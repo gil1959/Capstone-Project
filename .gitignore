@@ -1,0 +1,37 @@
+# Python Bytecode & Cache
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+
+# Environment Variables & Secrets (JANGAN DI-PUSH KE GITHUB)
+.env
+.env.local
+.env.*.local
+!.env.example
+
+# Virtual Environments
+venv/
+.venv/
+env/
+ENV/
+
+# IDE & System Files
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+*.log
+
+# Large Historical Datasets (Melebihi Batas GitHub 100 MB)
+data/processed/training_dataset*.parquet
+data/processed/weather_*.parquet
+data/raw/firms_cache_*
+data/raw/weather_anchor_cache_*
+data/raw/weather_cache_*
+data/raw/weather_daily_cache_*
+
+# Optional Historical GeoJSON scenarios (keep only latest/sample)
+data/processed/fire_warning_kalimantan_2024-09-06.geojson
+data/processed/fire_warning_kalimantan_2024-09-14.geojson
+data/processed/fire_warning_kalimantan_2024-12-31.geojson

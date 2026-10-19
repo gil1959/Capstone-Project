@@ -1,0 +1,95 @@
+{
+  "algorithm": "XGBoost",
+  "xgboost_version": "3.4.1",
+  "features": [
+    "temp_max",
+    "rain_sum",
+    "wind_speed_max",
+    "vpd_max",
+    "soil_moisture_0_7cm",
+    "soil_moisture_7_28cm",
+    "rain_sum_7d",
+    "rain_sum_14d",
+    "temp_max_7d_avg",
+    "dry_days_count",
+    "hotspot_count",
+    "max_frp",
+    "hotspot_lag_1d",
+    "elevation",
+    "peat_coverage_pct",
+    "peat_dryness_factor"
+  ],
+  "threshold_sedang": 28.4,
+  "threshold_tinggi": 38.4,
+  "pr_auc": 0.06915304445966967,
+  "roc_auc": 0.8188498867779718,
+  "scale_pos_weight": 13.5,
+  "confusion_matrix": {
+    "true_positive": 2179,
+    "false_negative": 8420,
+    "false_positive": 14335,
+    "true_negative": 4987436,
+    "fire_recall_pct": 20.558543258798
+  },
+  "classification_report": {
+    "AMAN (0)": {
+      "precision": 0.998314603143085,
+      "recall": 0.9971340151318403,
+      "f1-score": 0.9977239598956833,
+      "support": 5001771.0
+    },
+    "API (1)": {
+      "precision": 0.13194864963061645,
+      "recall": 0.20558543258798,
+      "f1-score": 0.16073470291004316,
+      "support": 10599.0
+    },
+    "accuracy": 0.9954602313875472,
+    "macro avg": {
+      "precision": 0.5651316263868507,
+      "recall": 0.6013597238599102,
+      "f1-score": 0.5792293314028633,
+      "support": 5012370.0
+    },
+    "weighted avg": {
+      "precision": 0.9964826129385952,
+      "recall": 0.9954602313875472,
+      "f1-score": 0.9959540887299891,
+      "support": 5012370.0
+    }
+  },
+  "top_features": [
+    {
+      "feature": "max_frp",
+      "importance_gain": 0.3028516173362732
+    },
+    {
+      "feature": "hotspot_count",
+      "importance_gain": 0.210855171084404
+    },
+    {
+      "feature": "rain_sum_14d",
+      "importance_gain": 0.14412443339824677
+    },
+    {
+      "feature": "hotspot_lag_1d",
+      "importance_gain": 0.05935818329453468
+    },
+    {
+      "feature": "vpd_max",
+      "importance_gain": 0.05854606628417969
+    },
+    {
+      "feature": "rain_sum",
+      "importance_gain": 0.04835369065403938
+    },
+    {
+      "feature": "rain_sum_7d",
+      "importance_gain": 0.04818825423717499
+    },
+    {
+      "feature": "dry_days_count",
+      "importance_gain": 0.04252976179122925
+    }
+  ]
+}
