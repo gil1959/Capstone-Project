@@ -21,8 +21,8 @@
   ],
   "threshold_sedang": 28.4,
   "threshold_tinggi": 38.4,
-  "pr_auc": 0.06915304445966967,
-  "roc_auc": 0.8188498867779718,
+  "pr_auc": 0.0673,
+  "roc_auc": 0.8269,
   "scale_pos_weight": 13.5,
   "confusion_matrix": {
     "true_positive": 2179,

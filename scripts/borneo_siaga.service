@@ -1,0 +1,31 @@
+# ==============================================================================
+# BORNEO SIAGA - Systemd Service untuk Menjalankan Web Server 24/7 di Ubuntu / Linux
+# Pasang ke: /etc/systemd/system/borneo_siaga.service
+# ==============================================================================
+#
+# Langkah Instalasi:
+# 1. sudo cp scripts/borneo_siaga.service /etc/systemd/system/
+# 2. sudo systemctl daemon-reload
+# 3. sudo systemctl enable borneo_siaga
+# 4. sudo systemctl start borneo_siaga
+# 5. sudo systemctl status borneo_siaga
+# ==============================================================================
+
+[Unit]
+Description=Borneo Siaga Forest Fire Early Warning Portal (FastAPI)
+After=network.target
+
+[Service]
+Type=simple
+User=ubuntu
+Group=ubuntu
+WorkingDirectory=/var/www/cpv2
+Environment="PATH=/var/www/cpv2/venv/bin:/usr/local/bin:/usr/bin:/bin"
+Environment="APP_ENV=production"
+Environment="PYTHONUNBUFFERED=1"
+ExecStart=/var/www/cpv2/venv/bin/python -m uvicorn src.api.main:app --host 0.0.0.0 --port 8000 --workers 2 --proxy-headers
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

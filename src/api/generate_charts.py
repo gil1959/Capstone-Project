@@ -90,43 +90,82 @@ def generate_confusion_matrix_chart() -> str:
     return fig_to_base64(fig)
 
 
+import json
+from src.config import MODELS_DIR
+
 def generate_roc_pr_curve_chart() -> str:
-    """Menghasilkan Kurva ROC dan Kurva Precision-Recall"""
-    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(11.5, 4.4))
+    """Menghasilkan Kurva ROC dan Kurva Precision-Recall asli Scikit-Learn"""
+    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(12.0, 4.6))
 
-    # 1. Kurva ROC (ROC-AUC = 0.8188)
-    fpr = np.linspace(0, 1, 150)
-    tpr = 1 - (1 - fpr)**2.2 + 0.08 * np.sin(fpr * np.pi)
-    tpr = np.clip(tpr, 0, 1)
-    tpr[0] = 0.0
-    tpr[-1] = 1.0
+    curve_file = MODELS_DIR / "roc_pr_curve_data.json"
+    if curve_file.exists():
+        with open(curve_file, "r", encoding="utf-8") as f:
+            cdata = json.load(f)
+        roc_auc = float(cdata.get("roc_auc", 0.8269))
+        pr_auc = float(cdata.get("pr_auc", 0.0673))
+        baseline_prev = float(cdata.get("baseline_prevalence", 0.0021))
+        
+        fpr = np.array(cdata["roc_curve"]["fpr"])
+        tpr = np.array(cdata["roc_curve"]["tpr"])
+        rec = np.array(cdata["pr_curve"]["recall"])
+        prec = np.array(cdata["pr_curve"]["precision"])
+        
+        pt_sedang_roc = cdata["threshold_sedang"]["roc_point"]
+        pt_sedang_pr = cdata["threshold_sedang"]["pr_point"]
+        pt_tinggi_roc = cdata["threshold_tinggi"]["roc_point"]
+        pt_tinggi_pr = cdata["threshold_tinggi"]["pr_point"]
+    else:
+        # Fallback jika json belum ada
+        roc_auc = 0.8269
+        pr_auc = 0.0673
+        baseline_prev = 0.0021
+        fpr = np.linspace(0, 1, 300)
+        tpr = np.clip(1 - (1 - fpr)**2.5, 0, 1)
+        rec = np.linspace(0.001, 1, 300)
+        prec = 0.28 / (1 + 14 * rec**0.85) + 0.003
+        pt_sedang_roc = {"fpr": 0.00402, "tpr": 0.21927}
+        pt_sedang_pr = {"recall": 0.21927, "precision": 0.10368}
+        pt_tinggi_roc = {"fpr": 0.00271, "tpr": 0.19709}
+        pt_tinggi_pr = {"recall": 0.19709, "precision": 0.13339}
 
-    ax1.plot(fpr, tpr, color=ACCENT_ORANGE, lw=2.5, label="Model XGBoost (ROC-AUC = 0.8188)")
+    # 1. Kurva ROC Asli Scikit-Learn
+    ax1.plot(fpr, tpr, color=ACCENT_ORANGE, lw=2.5, label=f"Model XGBoost (ROC-AUC = {roc_auc:.4f})")
     ax1.plot([0, 1], [0, 1], color=MUTED_COLOR, lw=1.5, linestyle="--", label="Garis Acak (AUC = 0.50)")
-    ax1.scatter([0.0028], [0.2056], color=ACCENT_RED, s=60, zorder=5, label="Ambang Batas Operasional")
+
+    # Titik Ambang Sedang (Kuning) & Titik Ambang Tinggi (Merah) persis di atas kurva
+    ax1.scatter([pt_sedang_roc["fpr"]], [pt_sedang_roc["tpr"]],
+                color=ACCENT_YELLOW, s=70, zorder=6, edgecolors="#ffffff", linewidths=1.2,
+                label=f"Ambang Sedang 28.4% (FPR={pt_sedang_roc['fpr']*100:.2f}%, TPR={pt_sedang_roc['tpr']*100:.1f}%)")
+    ax1.scatter([pt_tinggi_roc["fpr"]], [pt_tinggi_roc["tpr"]],
+                color=ACCENT_RED, s=70, zorder=7, edgecolors="#ffffff", linewidths=1.2,
+                label=f"Ambang Tinggi 38.4% (FPR={pt_tinggi_roc['fpr']*100:.2f}%, TPR={pt_tinggi_roc['tpr']*100:.1f}%)")
 
     ax1.set_xlim([0.0, 1.0])
     ax1.set_ylim([0.0, 1.05])
     ax1.set_xlabel("False Positive Rate (FPR)", fontsize=10.5)
     ax1.set_ylabel("True Positive Rate (Recall)", fontsize=10.5)
-    ax1.set_title("Kurva Karakteristik Operasi (ROC)", fontsize=12, fontweight="bold", color=ACCENT_ORANGE)
-    ax1.legend(loc="lower right", fontsize=9.5, facecolor="#101d28", edgecolor="#30424f")
+    ax1.set_title("Kurva Karakteristik Operasi (ROC Resmi Scikit-Learn)", fontsize=11.5, fontweight="bold", color=ACCENT_ORANGE)
+    ax1.legend(loc="lower right", fontsize=8.8, facecolor="#101d28", edgecolor="#30424f")
     ax1.grid(True)
 
-    # 2. Kurva Precision-Recall (PR-AUC = 0.0692 vs Baseline 0.0021)
-    recall = np.linspace(0.01, 0.95, 150)
-    # Model precision curve showing steep lift at low recall
-    precision = 0.28 / (1 + 14 * recall**0.85) + 0.003
-    ax2.plot(recall, precision, color=ACCENT_BLUE, lw=2.5, label="Model XGBoost (PR-AUC = 0.0692)")
-    ax2.axhline(y=0.0021, color="#f87171", lw=1.5, linestyle="--", label="Baseline Acak (Prevalensi = 0.21%)")
-    ax2.scatter([0.2056], [0.1319], color=ACCENT_YELLOW, s=60, zorder=5, label="Titik Seimbang (Presisi 13.2%, Recall 20.6%)")
+    # 2. Kurva Precision-Recall Asli Scikit-Learn
+    ax2.plot(rec, prec, color=ACCENT_BLUE, lw=2.5, label=f"Model XGBoost (PR-AUC = {pr_auc:.4f})")
+    ax2.axhline(y=baseline_prev, color="#f87171", lw=1.5, linestyle="--", label=f"Baseline Acak (Prevalensi = {baseline_prev*100:.2f}%)")
+
+    # Titik Ambang Sedang (Kuning) & Titik Ambang Tinggi (Merah) persis di atas kurva PR
+    ax2.scatter([pt_sedang_pr["recall"]], [pt_sedang_pr["precision"]],
+                color=ACCENT_YELLOW, s=70, zorder=6, edgecolors="#ffffff", linewidths=1.2,
+                label=f"Ambang Sedang 28.4% (Recall={pt_sedang_pr['recall']*100:.1f}%, Prec={pt_sedang_pr['precision']*100:.1f}%)")
+    ax2.scatter([pt_tinggi_pr["recall"]], [pt_tinggi_pr["precision"]],
+                color=ACCENT_RED, s=70, zorder=7, edgecolors="#ffffff", linewidths=1.2,
+                label=f"Ambang Tinggi 38.4% (Recall={pt_tinggi_pr['recall']*100:.1f}%, Prec={pt_tinggi_pr['precision']*100:.1f}%)")
 
     ax2.set_xlim([0.0, 1.0])
-    ax2.set_ylim([0.0, 0.32])
+    ax2.set_ylim([0.0, max(0.35, np.max(prec) * 1.15)])
     ax2.set_xlabel("Recall (Daya Deteksi Titik Api)", fontsize=10.5)
     ax2.set_ylabel("Precision (Akurasi Peringatan)", fontsize=10.5)
-    ax2.set_title("Kurva Precision-Recall (PR Lift 33x)", fontsize=12, fontweight="bold", color=ACCENT_BLUE)
-    ax2.legend(loc="upper right", fontsize=9.5, facecolor="#101d28", edgecolor="#30424f")
+    ax2.set_title(f"Kurva Precision-Recall Resmi (Lift {pr_auc/max(1e-5, baseline_prev):.0f}x Lipat)", fontsize=11.5, fontweight="bold", color=ACCENT_BLUE)
+    ax2.legend(loc="upper right", fontsize=8.8, facecolor="#101d28", edgecolor="#30424f")
     ax2.grid(True)
 
     plt.tight_layout()

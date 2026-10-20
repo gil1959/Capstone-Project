@@ -155,5 +155,9 @@ if __name__ == "__main__":
         clean.to_parquet(out)
         print(f"[OK] Data hotspot terbaru disimpan di: {out}")
 
+    elif args.mode == "train":
+        train_fire_model()
+
     elif args.mode == "daily_predict":
         run_daily_prediction()
+

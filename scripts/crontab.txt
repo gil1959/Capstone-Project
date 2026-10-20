@@ -1,0 +1,17 @@
+# ==============================================================================
+# BORNEO SIAGA - Konfigurasi Crontab Server (Linux / Ubuntu / Debian)
+# Pasang dengan menjalankan perintah: crontab -e
+# ==============================================================================
+#
+# Catatan Jadwal Eksekusi:
+# Satelit NASA FIRMS NRT dan cuaca harian Open-Meteo diperbarui setiap malam/pagi.
+# Direkomendasikan dijalankan setiap pukul 06:00 WIB (23:00 UTC hari sebelumnya).
+#
+# Format:
+# m h dom mon dow   command
+
+# Jalankan pipeline prediksi & evaluasi harian setiap pukul 06:00 WIB (Server Timezone Asia/Jakarta)
+0 6 * * * /bin/bash /var/www/cpv2/scripts/run_daily_pipeline.sh >> /var/www/cpv2/logs/cron_pipeline.log 2>&1
+
+# Opsi Cadangan jika Server menggunakan UTC (06:00 WIB = 23:00 UTC):
+# 0 23 * * * /bin/bash /var/www/cpv2/scripts/run_daily_pipeline.sh >> /var/www/cpv2/logs/cron_pipeline.log 2>&1
