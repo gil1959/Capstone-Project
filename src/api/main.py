@@ -24,7 +24,6 @@ from fastapi.responses import HTMLResponse, JSONResponse
 sys.path.append(str(Path(__file__).resolve().parent.parent.parent))
 from src.config import PROCESSED_DATA_DIR, RAW_DATA_DIR, MODELS_DIR
 from src.api.admin_view import get_admin_html
-from src.api.stakeholder_view import get_stakeholder_html
 from src.api.geo_resolver import resolve_location
 
 app = FastAPI(title="Kalimantan Forest Fire Early Warning Portal")
@@ -44,7 +43,7 @@ def ensure_warning_geojson(date_str: str = "latest"):
     if date_str == "latest":
         geojson_path = PROCESSED_DATA_DIR / "latest_fire_warning_kalimantan.geojson"
         if not geojson_path.exists():
-            geojson_path = PROCESSED_DATA_DIR / "fire_warning_kalimantan_2024-09-03.geojson"
+            geojson_path = PROCESSED_DATA_DIR / "fire_warning_kalimantan_2025-09-24.geojson"
     else:
         geojson_path = PROCESSED_DATA_DIR / f"fire_warning_kalimantan_{date_str}.geojson"
         if not geojson_path.exists():
@@ -171,15 +170,22 @@ def get_hotspots_today(date: str = Query("latest")):
             except Exception as e:
                 print(f"[WARN] Gagal membaca CSV hotspots latest: {e}")
 
-    raw_file = RAW_DATA_DIR / "firms_VIIRS_NOAA20_SP_2023_2024.parquet"
-    if raw_file.exists():
+    target_d = "2025-09-24" if date in ["latest", "2024-09-03"] else date
+    year = target_d.split("-")[0] if "-" in target_d else "2025"
+
+    sp_file = RAW_DATA_DIR / f"firms_VIIRS_NOAA20_SP_{year}_{year}.parquet"
+    if not sp_file.exists():
+        sp_file = RAW_DATA_DIR / "firms_VIIRS_NOAA20_SP_2025_2025.parquet"
+    if not sp_file.exists():
+        sp_file = RAW_DATA_DIR / "firms_VIIRS_NOAA20_SP_2023_2024.parquet"
+
+    if sp_file.exists():
         try:
-            df = pd.read_parquet(raw_file)
-            target_d = date if date != "latest" else "2024-09-03"
+            df = pd.read_parquet(sp_file)
             df_day = df[df["acq_date"] == target_d].copy()
             if not df_day.empty:
-                if len(df_day) > 600:
-                    df_day = df_day.sample(600, random_state=42)
+                if len(df_day) > 800:
+                    df_day = df_day.sort_values(by="frp", ascending=False).head(800)
                 points = []
                 for _, row in df_day.iterrows():
                     points.append({
@@ -187,7 +193,27 @@ def get_hotspots_today(date: str = Query("latest")):
                         "lon": float(row["longitude"]),
                         "frp": round(float(row.get("frp", 0.0)), 1),
                         "confidence": str(row.get("confidence", "nominal")),
-                        "date": str(row.get("acq_date", date)),
+                        "date": str(row.get("acq_date", target_d)),
+                    })
+                return {"total": len(points), "hotspots": points, "date": target_d}
+        except Exception as e:
+            print(f"[WARN] Gagal membaca parquet FIRMS: {e}")
+
+    # Fallback ke snapped multi-tahun jika ada
+    snapped = PROCESSED_DATA_DIR / "hotspots_snapped_2020_2025.parquet"
+    if snapped.exists():
+        try:
+            df = pd.read_parquet(snapped)
+            df_day = df[df["date"].astype(str).str.startswith(target_d)].copy()
+            if not df_day.empty:
+                points = []
+                for _, row in df_day.head(800).iterrows():
+                    points.append({
+                        "lat": float(row["lat"]),
+                        "lon": float(row["lon"]),
+                        "frp": round(float(row.get("max_frp", 0.0)), 1),
+                        "confidence": "high",
+                        "date": target_d,
                     })
                 return {"total": len(points), "hotspots": points, "date": target_d}
         except Exception:
@@ -262,7 +288,7 @@ def download_report_csv(date: str = Query("latest")):
 
 @app.post("/api/login")
 async def api_login(request: Request):
-    """Autentikasi role Admin dan Stakeholder"""
+    """Autentikasi role Admin"""
     try:
         data = await request.json()
     except Exception:
@@ -273,12 +299,10 @@ async def api_login(request: Request):
 
     if username == "admin" and password == "admin123":
         return {"status": "success", "role": "admin", "redirect": "/admin"}
-    elif username == "stakeholder" and password == "stakeholder123":
-        return {"status": "success", "role": "stakeholder", "redirect": "/stakeholder"}
     else:
         return JSONResponse(
             status_code=401,
-            content={"status": "error", "message": "Nama pengguna atau kata sandi tidak valid. Gunakan admin (admin123) atau stakeholder (stakeholder123)."}
+            content={"status": "error", "message": "Nama pengguna atau kata sandi tidak valid. Gunakan admin (admin123)."}
         )
 
 @app.get("/favicon.ico", include_in_schema=False)
@@ -294,27 +318,22 @@ def admin_page():
     return HTMLResponse(content=get_admin_html())
 
 
-@app.get("/stakeholder", response_class=HTMLResponse)
-def stakeholder_page():
-    """Halaman Dashboard Operasional Satgas & Stakeholder Sesuai Use Case Diagram"""
-    return HTMLResponse(content=get_stakeholder_html())
-
-
 @app.get("/api/risk-trends")
 def get_risk_trends():
-    """Data empiris tren risiko temporal 2023-2024 dan sebaran hotspot per provinsi"""
+    """Data empiris tren risiko temporal 2023-2025 dan sebaran hotspot per provinsi"""
     return {
         "monthly_hotspots": {
-            "2023": [120, 240, 580, 1100, 2450, 4800, 9200, 15400, 21430, 18770, 4120, 890],
-            "2024": [95, 180, 410, 850, 1600, 3100, 5200, 6900, 7579, 2792, 650, 159],
+            "2023": [398, 462, 376, 999, 1321, 1783, 7550, 21966, 25297, 20813, 2408, 851],
+            "2024": [631, 1095, 1169, 1818, 668, 542, 4618, 3766, 16472, 3920, 866, 230],
+            "2025": [74, 251, 155, 178, 583, 548, 6025, 6982, 8559, 2351, 594, 120],
             "months": ["Jan", "Feb", "Mar", "Apr", "Mei", "Jun", "Jul", "Agu", "Sep", "Okt", "Nov", "Des"]
         },
         "province_distribution": [
-            {"provinsi": "Kalimantan Barat", "persentase": 42.4, "hotspot_total": 31400},
-            {"provinsi": "Kalimantan Tengah", "persentase": 38.1, "hotspot_total": 28200},
-            {"provinsi": "Kalimantan Selatan", "persentase": 10.8, "hotspot_total": 8000},
-            {"provinsi": "Kalimantan Timur", "persentase": 5.9, "hotspot_total": 4370},
-            {"provinsi": "Kalimantan Utara", "persentase": 2.8, "hotspot_total": 2070}
+            {"provinsi": "Kalimantan Barat", "persentase": 41.8, "hotspot_total": 43100},
+            {"provinsi": "Kalimantan Tengah", "persentase": 37.9, "hotspot_total": 39100},
+            {"provinsi": "Kalimantan Selatan", "persentase": 11.2, "hotspot_total": 11600},
+            {"provinsi": "Kalimantan Timur", "persentase": 6.3, "hotspot_total": 6500},
+            {"provinsi": "Kalimantan Utara", "persentase": 2.8, "hotspot_total": 2900}
         ]
     }
 
@@ -322,17 +341,14 @@ def get_risk_trends():
 @app.get("/", response_class=HTMLResponse)
 def index():
     """Halaman Utama Web GIS Berdesain Clean Glassmorphism dengan Penanda Bahaya Proporsional"""
-    is_prod = os.getenv("APP_ENV", "local").lower() in ["prod", "production"]
-    default_date = "latest" if is_prod else "2024-09-03"
-    env_badge = '<span style="font-size: 10px; padding: 2px 7px; border-radius: 4px; background: rgba(56, 189, 248, 0.2); color: #38bdf8; border: 1px solid rgba(56, 189, 248, 0.4); font-weight: 700; text-transform: uppercase;">PROD · LIVE DAILY</span>' if is_prod else '<span style="font-size: 10px; padding: 2px 7px; border-radius: 4px; background: rgba(239, 155, 75, 0.2); color: #ef9b4b; border: 1px solid rgba(239, 155, 75, 0.4); font-weight: 700; text-transform: uppercase;">LOKAL · UJI 2024</span>'
-    date_title = 'Prediksi untuk <b>Terkini</b> <small>H+1 (Real-Time Satelit NASA & Cuaca)</small>' if is_prod else 'Prediksi untuk <b>3 September 2024</b> <small>UTC (Puncak Kemarau - 353 Sel Merah)</small>'
-    sel_latest = "selected" if is_prod else ""
-    sel_test = "" if is_prod else "selected"
-    date_options = f"""<option value="latest" {sel_latest}>🔥 Prediksi Terkini (Real-Time Pipeline H+1)</option>
-                <option value="2024-09-03" {sel_test}>03 September 2024 (Puncak Karhutla - 353 Sel Merah)</option>
-                <option value="2024-09-06">06 September 2024 (Siaga Karhutla Darat)</option>
-                <option value="2024-09-14">14 September 2024 (Kemarau Kalteng/Kalsel)</option>
-                <option value="2024-12-31">31 Desember 2024 (Musim Hujan - 100% Aman)</option>"""
+    default_date = "latest"
+    env_badge = ""
+    date_title = 'Prediksi untuk <b>24 September 2025</b> <small>H+1 (Puncak Kemarau Kalimantan)</small>'
+    date_options = f"""<option value="latest" selected>🔥 Prediksi Model Terkini (24 Sep 2025 - 2.916 Sel Merah)</option>
+                <option value="2025-09-24">24 September 2025 (Puncak Karhutla - 2.916 Sel Siaga Merah)</option>
+                <option value="2025-08-28">28 Agustus 2025 (Fase Kritis Kemarau - 2.296 Sel Siaga Merah)</option>
+                <option value="2025-07-30">30 Juli 2025 (Awal Eskalasi Kemarau - 1.681 Sel Siaga Merah)</option>
+                <option value="2025-12-31">31 Desember 2025 (Musim Hujan - 100% Aman)</option>"""
 
     html_content = """<!DOCTYPE html>
 <html lang="id">
@@ -590,10 +606,6 @@ def index():
             __INITIAL_DATE_TITLE__
         </div>
         <div style="margin-top: 6px; display: flex; align-items: center; gap: 10px; flex-wrap: wrap;">
-            <button type="button" onclick="showModalDialog('modal-daily-eval', event)" id="header-eval-badge" style="background: rgba(56, 189, 248, 0.15); border: 1px solid #38bdf8; color: #38bdf8; font-size: 11px; font-weight: 700; padding: 2px 8px; border-radius: 5px; cursor: pointer; display: inline-flex; align-items: center; gap: 5px; white-space: nowrap;">
-                <svg class="icon-svg" style="width: 12px; height: 12px;" viewBox="0 0 24 24"><path d="M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41z"/></svg>
-                <span id="header-eval-rate">Eval Daily: 86.6% Recall</span>
-            </button>
             <div class="risk-chips" id="summary-chips" style="margin-top: 0; display: inline-flex; align-items: center; gap: 10px;">
                 <span class="chip"><span class="chip-dot" style="background: #22c55e;"></span> Rendah: Memuat...</span>
                 <span class="chip"><span class="chip-dot" style="background: #facc15;"></span> Sedang: Memuat...</span>
@@ -620,7 +632,7 @@ def index():
 
         <!-- Dropdown Pilih Lokasi Nyata Seluruh Peringatan -->
         <select class="warning-select" id="warning-dropdown" onchange="onSelectWarningDropdown(this.value)">
-            <option value="">-- Pilih Lokasi Wilayah Rawan (353 Titik) --</option>
+            <option value="">-- Pilih Lokasi Wilayah Rawan (Memuat...) --</option>
         </select>
     </div>
 
@@ -644,11 +656,7 @@ def index():
             <span>Tanggal</span>
         </button>
 
-        <!-- Eval Daily Modal Button -->
-        <button type="button" class="tool-btn" style="border-color: #38bdf8; color: #38bdf8;" onclick="showModalDialog('modal-daily-eval', event)">
-            <svg class="icon-svg" viewBox="0 0 24 24"><path d="M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41z"/></svg>
-            <span>Eval Daily</span>
-        </button>
+
 
         <!-- Info Button -->
         <button type="button" class="tool-btn" onclick="showPopoverMenu('popover-info', event)">
@@ -700,11 +708,10 @@ def index():
         </div>
         <div class="form-group">
             <label>Tampilkan Status Risiko & Penanda</label>
-            <label class="checkbox-item"><input type="checkbox" id="chk-beacons" checked onchange="updateFilters()"> <span style="display:inline-block; width:8px; height:8px; background:#ef4444; border:1px solid #fff; border-radius:50%;"></span> Penanda Bahaya Prediksi</label>
             <label class="checkbox-item"><input type="checkbox" id="chk-tinggi" checked onchange="updateFilters()"> <span style="display:inline-block; width:10px; height:10px; background:#ef4444; border-radius:2px;"></span> Grid Bahaya Tinggi (Merah)</label>
             <label class="checkbox-item"><input type="checkbox" id="chk-sedang" checked onchange="updateFilters()"> <span style="display:inline-block; width:10px; height:10px; background:#facc15; border-radius:2px;"></span> Grid Waspada Sedang (Kuning)</label>
             <label class="checkbox-item"><input type="checkbox" id="chk-rendah" checked onchange="updateFilters()"> <span style="display:inline-block; width:10px; height:10px; background:#22c55e; border-radius:2px;"></span> Grid Aman Rendah (Hijau)</label>
-            <label class="checkbox-item"><input type="checkbox" id="chk-hotspots" checked onchange="toggleHotspots(this.checked)"> <span style="display:inline-block; width:8px; height:8px; background:#ea580c; border:1px solid #fff; border-radius:50%;"></span> Titik Api Satelit (FIRMS)</label>
+            <label class="checkbox-item"><input type="checkbox" id="chk-hotspots" checked onchange="toggleHotspots(this.checked)"> <span style="display:inline-block; width:8px; height:8px; background:#ff2200; border:1px solid #fff; border-radius:50%;"></span> Titik Api Satelit (FIRMS)</label>
         </div>
         <div class="form-group">
             <label>Transparansi Warna Grid: <span id="opacity-val">28%</span></label>
@@ -750,9 +757,9 @@ def index():
     <div class="glass-panel map-footer">
         <div class="risk-legend">
             <span><span class="legend-box" style="background: #22c55e;"></span> Rendah</span>
-            <span><span style="display:inline-block; width:8px; height:8px; background:#facc15; border:1px solid #fff; border-radius:50%;"></span> Sedang (Waspada)</span>
-            <span><span style="display:inline-block; width:8px; height:8px; background:#ef4444; border:1px solid #fff; border-radius:50%;"></span> Tinggi (Bahaya)</span>
-            <span><span style="display:inline-block; width:8px; height:8px; background:#ea580c; border:1px solid #fff; border-radius:50%;"></span> Hotspot NASA</span>
+            <span><span class="legend-box" style="background: #facc15;"></span> Sedang</span>
+            <span><span class="legend-box" style="background: #ef4444;"></span> Tinggi</span>
+            <span><span style="display:inline-block; width:8px; height:8px; background:#ff2200; border:1px solid #fff; border-radius:50%;"></span> Hotspot NASA</span>
         </div>
         <div style="display: flex; justify-content: space-between; align-items: center; border-top: 1px solid #283745; padding-top: 8px; font-size: 12px;">
             <span id="footer-status" style="color: #94a3b8;">Status: Peta prediksi siap ditampilkan (22.276 kotak).</span>
@@ -771,13 +778,13 @@ def index():
         </div>
     </div>
 
-    <!-- Modal: Login Admin & Stakeholder -->
+    <!-- Modal: Login Admin -->
     <div class="modal-overlay" id="modal-login" onclick="if(event.target === this) hideModalDialog('modal-login', event)">
-        <div class="modal-body" style="max-width: 420px; padding: 22px;">
+        <div class="modal-body" style="max-width: 400px; padding: 22px;">
             <div class="modal-header">
                 <div>
-                    <h2 style="font-size: 16px; color: #ef9b4b;">Masuk Sistem Karhutla</h2>
-                    <div style="font-size: 11.5px; color: #94a3b8; margin-top: 2px;">Role Admin atau Stakeholder</div>
+                    <h2 style="font-size: 16px; color: #ef9b4b;">Masuk Administrator Sistem</h2>
+                    <div style="font-size: 11.5px; color: #94a3b8; margin-top: 2px;">Akses Khusus Evaluasi Model & Arsitektur</div>
                 </div>
                 <button type="button" class="close-btn" onclick="hideModalDialog('modal-login', event)">&times;</button>
             </div>
@@ -785,7 +792,7 @@ def index():
             <form id="form-login" onsubmit="handleLoginSubmit(event)">
                 <div class="form-group">
                     <label for="login-username">Nama Pengguna (Username)</label>
-                    <input type="text" id="login-username" class="form-input" placeholder="admin / stakeholder" required autocomplete="username" />
+                    <input type="text" id="login-username" class="form-input" placeholder="admin" required autocomplete="username" />
                 </div>
                 <div class="form-group" style="margin-top: 10px;">
                     <label for="login-password">Kata Sandi (Password)</label>
@@ -794,22 +801,16 @@ def index():
                 <div id="login-error-msg" style="display: none; margin-top: 10px; font-size: 11.5px; color: #ef4444; background: rgba(239, 68, 68, 0.15); border: 1px solid rgba(239, 68, 68, 0.35); padding: 7px 10px; border-radius: 6px;"></div>
                 
                 <button type="submit" id="btn-submit-login" class="tool-btn" style="width: 100%; margin-top: 14px; background: #ef9b4b; color: #0a121b; font-weight: 700; border: none; padding: 9px; justify-content: center;">
-                    LOGIN
+                    LOGIN ADMINISTRATOR
                 </button>
             </form>
 
             <div style="margin-top: 16px; border-top: 1px solid #233441; padding-top: 12px;">
                 <div style="font-size: 11px; text-transform: uppercase; color: #94a3b8; letter-spacing: 0.5px; margin-bottom: 6px;">Akses Cepat (Demo):</div>
-                <div style="display: flex; flex-direction: column; gap: 6px;">
-                    <button type="button" onclick="quickLogin('admin', 'admin123')" class="tool-btn" style="justify-content: space-between; font-size: 11.5px; padding: 7px 10px;">
-                        <span><b>Admin</b> (Evaluasi Python & Pipeline)</span>
-                        <span style="color: #ef9b4b;">admin123 &rarr;</span>
-                    </button>
-                    <button type="button" onclick="quickLogin('stakeholder', 'stakeholder123')" class="tool-btn" style="justify-content: space-between; font-size: 11.5px; padding: 7px 10px;">
-                        <span><b>Stakeholder</b> (Satgas BPBD / Manggala Agni)</span>
-                        <span style="color: #38bdf8;">stakeholder123 &rarr;</span>
-                    </button>
-                </div>
+                <button type="button" onclick="quickLogin('admin', 'admin123')" class="tool-btn" style="width: 100%; justify-content: space-between; font-size: 11.5px; padding: 7px 10px;">
+                    <span><b>Admin</b> (Evaluasi Model & Pipeline)</span>
+                    <span style="color: #ef9b4b;">admin123 &rarr;</span>
+                </button>
             </div>
         </div>
     </div>
@@ -830,12 +831,12 @@ def index():
             <div class="metric-grid">
                 <div class="metric-card">
                     <div class="title">Total Sel Bahaya Tinggi</div>
-                    <div class="val" style="color: #ef4444;" id="warning-total-high">353 Sel</div>
+                    <div class="val" style="color: #ef4444;" id="warning-total-high">3.516 Sel</div>
                     <div class="sub">Prioritas Patroli Darat</div>
                 </div>
                 <div class="metric-card">
                     <div class="title">Sel di Lahan Gambut</div>
-                    <div class="val" style="color: #facc15;" id="warning-peat-count">112 Sel</div>
+                    <div class="val" style="color: #facc15;" id="warning-peat-count">1.248 Sel</div>
                     <div class="sub">Rawan Kebakaran Bawah Tanah</div>
                 </div>
                 <div class="metric-card">
@@ -852,7 +853,7 @@ def index():
 
             <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
                 <span style="font-size: 12px; color: #cbd5e1; font-weight: 600;">Daftar Wilayah Prioritas Terkini:</span>
-                <a href="/api/download-report-csv?date=2024-09-03" class="tool-btn" style="padding: 5px 10px; font-size: 11.5px; background: #ef9b4b; color: #0a121b; font-weight: 700;">
+                <a href="/api/download-report-csv?date=2025-09-24" class="tool-btn" style="padding: 5px 10px; font-size: 11.5px; background: #ef9b4b; color: #0a121b; font-weight: 700;">
                     <svg class="icon-svg" viewBox="0 0 24 24"><path d="M19.35 10.04C18.67 6.59 15.64 4 12 4 9.11 4 6.6 5.64 5.35 8.04 2.34 8.36 0 10.91 0 14c0 3.31 2.69 6 6 6h13c2.76 0 5-2.24 5-5 0-2.64-2.05-4.78-4.65-4.96zM17 13l-5 5-5-5h3V9h4v4h3z"/></svg>
                     Ekspor CSV
                 </a>
@@ -889,7 +890,7 @@ def index():
                 Daftar wilayah dengan skor risiko tertinggi (Status TINGGI) hasil model XGBoost untuk panduan patroli darat Manggala Agni / BPBD.
             </p>
             <div style="margin-bottom: 12px;">
-                <a href="/api/download-report-csv?date=2024-09-03" id="modal-csv-btn" class="tool-btn" style="display: inline-flex; background: #ef9b4b; color: #0a121b; font-weight: 700;">
+                <a href="/api/download-report-csv?date=2025-09-24" id="modal-csv-btn" class="tool-btn" style="display: inline-flex; background: #ef9b4b; color: #0a121b; font-weight: 700;">
                     <svg class="icon-svg" viewBox="0 0 24 24"><path d="M19.35 10.04C18.67 6.59 15.64 4 12 4 9.11 4 6.6 5.64 5.35 8.04 2.34 8.36 0 10.91 0 14c0 3.31 2.69 6 6 6h13c2.76 0 5-2.24 5-5 0-2.64-2.05-4.78-4.65-4.96zM17 13l-5 5-5-5h3V9h4v4h3z"/></svg>
                     Unduh Laporan Lengkap (.CSV)
                 </a>
@@ -1149,11 +1150,11 @@ def index():
                         data.hotspots.forEach(pt => {
                             L.circleMarker([pt.lat, pt.lon], {
                                 pane: 'hotspotPane',
-                                radius: zoom <= 6 ? 3.5 : 4.5,
-                                fillColor: '#ea580c',
+                                radius: zoom <= 6 ? 4.0 : 5.5,
+                                fillColor: '#ff2200',
                                 color: '#ffffff',
-                                weight: 1.0,
-                                opacity: 0.9,
+                                weight: 1.5,
+                                opacity: 1.0,
                                 fillOpacity: 0.95
                             }).bindPopup(`
                                 <div style="font-family: system-ui, sans-serif; padding: 4px; color: #edf4f5;">
@@ -1189,7 +1190,6 @@ def index():
             if (geojsonLayer) map.removeLayer(geojsonLayer);
             riskBeaconLayer.clearLayers();
 
-            const showBeacons = document.getElementById('chk-beacons') ? document.getElementById('chk-beacons').checked : true;
             const showTinggi = document.getElementById('chk-tinggi').checked;
             const showSedang = document.getElementById('chk-sedang').checked;
             const showRendah = document.getElementById('chk-rendah').checked;
@@ -1212,17 +1212,14 @@ def index():
                     return {
                         pane: 'gridPane',
                         fillColor: getFillColor(lvl),
-                        fillOpacity: isHigh ? Math.min(0.9, currentOpacity + 0.45) : (isMed ? Math.min(0.75, currentOpacity + 0.3) : (zoom <= 8 ? 0.10 : currentOpacity * 0.7)),
-                        weight: isHigh ? 2.0 : (isMed ? 1.5 : (zoom >= 9 ? 0.4 : 0)),
-                        color: isHigh ? '#ffffff' : (isMed ? '#ffffff' : 'rgba(255, 255, 255, 0.25)'),
-                        opacity: isHigh ? 1.0 : (isMed ? 0.9 : (zoom >= 9 ? 0.4 : 0))
+                        fillOpacity: isHigh ? Math.min(0.85, currentOpacity + 0.40) : (isMed ? Math.min(0.65, currentOpacity + 0.25) : (zoom <= 8 ? 0.08 : currentOpacity * 0.5)),
+                        weight: isHigh ? (zoom >= 8 ? 1.0 : 0.4) : (isMed ? (zoom >= 8 ? 0.8 : 0.3) : (zoom >= 9 ? 0.2 : 0)),
+                        color: isHigh ? '#ef4444' : (isMed ? '#facc15' : 'transparent'),
+                        opacity: isHigh ? 0.7 : (isMed ? 0.5 : 0)
                     };
                 },
                 onEachFeature: function(feature, layer) {
                     const p = feature.properties;
-                    const lvl = (p.risk_level || 'RENDAH').toUpperCase();
-                    const isHigh = lvl === 'TINGGI';
-                    const isMed = lvl === 'SEDANG';
                     const popupContent = createPopupContent(p);
                     layer.bindPopup(popupContent, { maxWidth: 300 });
 
@@ -1235,46 +1232,6 @@ def index():
                         },
                         click: function(e) { e.target.openPopup(); }
                     });
-
-                    // Penanda bahaya ukuran sama persis dengan NASA FIRMS (Radius 3.5 - 4.5 px)
-                    if (showBeacons && p.lat && p.lon) {
-                        const r = getRiskBeaconRadius(lvl, zoom);
-                        if (isHigh && showTinggi) {
-                            const beacon = L.circleMarker([p.lat, p.lon], {
-                                pane: 'dangerPane',
-                                radius: r,
-                                fillColor: '#ef4444',
-                                color: '#ffffff',
-                                weight: 1.0,
-                                opacity: 1,
-                                fillOpacity: 0.95
-                            });
-                            beacon.bindPopup(popupContent, { maxWidth: 300 });
-                            beacon.on({
-                                mouseover: function(e) { e.target.setStyle({ weight: 2.0, radius: r + 1.0 }); },
-                                mouseout: function(e) { e.target.setStyle({ weight: 1.0, radius: r }); },
-                                click: function(e) { e.target.openPopup(); }
-                            });
-                            beacon.addTo(riskBeaconLayer);
-                        } else if (isMed && showSedang) {
-                            const beacon = L.circleMarker([p.lat, p.lon], {
-                                pane: 'dangerPane',
-                                radius: r,
-                                fillColor: '#facc15',
-                                color: '#ffffff',
-                                weight: 1.0,
-                                opacity: 1,
-                                fillOpacity: 0.95
-                            });
-                            beacon.bindPopup(popupContent, { maxWidth: 300 });
-                            beacon.on({
-                                mouseover: function(e) { e.target.setStyle({ weight: 2.0, radius: r + 1.0 }); },
-                                mouseout: function(e) { e.target.setStyle({ weight: 1.0, radius: r }); },
-                                click: function(e) { e.target.openPopup(); }
-                            });
-                            beacon.addTo(riskBeaconLayer);
-                        }
-                    }
                 }
             }).addTo(map);
 
@@ -1471,14 +1428,15 @@ def index():
         window.changeDate = function(date) {
             document.getElementById('popover-tanggal').classList.remove('open');
             const titles = {
-                'latest': 'Terkini <small>H+1 (Real-Time Satelit & Cuaca)</small>',
-                '2024-09-03': '3 September 2024 <small>UTC (Puncak Kemarau - 353 Sel Merah)</small>',
-                '2024-09-06': '6 September 2024 <small>UTC (Siaga Karhutla Darat)</small>',
-                '2024-09-14': '14 September 2024 <small>UTC (Kemarau Kalteng/Kalsel)</small>',
-                '2024-12-31': '31 Desember 2024 <small>UTC (Musim Penghujan)</small>'
+                'latest': '24 September 2025 <small>H+1 (Puncak Kemarau Kalimantan)</small>',
+                '2025-09-24': '24 September 2025 <small>H+1 (Puncak Karhutla - 2.916 Sel Merah)</small>',
+                '2025-08-28': '28 Agustus 2025 <small>H+1 (Fase Kritis Kemarau - 2.296 Sel Merah)</small>',
+                '2025-07-30': '30 Juli 2025 <small>H+1 (Awal Eskalasi Kemarau - 1.681 Sel Merah)</small>',
+                '2025-12-31': '31 Desember 2025 <small>H+1 (Musim Penghujan - 100% Aman)</small>'
             };
-            document.getElementById('date-label').innerHTML = 'Prediksi untuk <b>' + (titles[date] || date) + '</b>';
-            document.getElementById('warning-date-label').innerText = 'Prediksi: ' + (date === 'latest' ? 'H+1 Terkini' : (date === '2024-09-03' ? '3 September 2024' : date)) + ' (H+1)';
+            const displayTitle = titles[date] || (date + ' <small>H+1</small>');
+            document.getElementById('date-label').innerHTML = 'Prediksi untuk <b>' + displayTitle + '</b>';
+            document.getElementById('warning-date-label').innerText = 'Prediksi: ' + (date === 'latest' ? '24 September 2025' : date) + ' (H+1)';
             loadData(date);
         };
 
@@ -1521,10 +1479,8 @@ def index():
             .catch(() => {
                 if (u === 'admin' && p === 'admin123') {
                     window.location.href = '/admin';
-                } else if (u === 'stakeholder' && p === 'stakeholder123') {
-                    window.location.href = '/stakeholder';
                 } else {
-                    errEl.innerText = 'Nama pengguna atau kata sandi tidak valid. Gunakan admin (admin123) atau stakeholder (stakeholder123).';
+                    errEl.innerText = 'Nama pengguna atau kata sandi tidak valid. Gunakan admin (admin123).';
                     errEl.style.display = 'block';
                 }
             });
@@ -1575,9 +1531,6 @@ def index():
                     }
                     if (document.getElementById('eval-status-badge') && latest) {
                         document.getElementById('eval-status-badge').innerText = (latest.operational_status || 'OPTIMAL').toUpperCase();
-                    }
-                    if (document.getElementById('header-eval-rate') && latest) {
-                        document.getElementById('header-eval-rate').innerText = `Eval Daily: ${latest.daily_capture_rate_pct}% Recall`;
                     }
                 })
                 .catch(() => {});

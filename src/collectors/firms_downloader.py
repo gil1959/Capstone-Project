@@ -24,25 +24,56 @@ from src.config import (
 class FIRMSDownloader:
     def __init__(self, map_key: str = None):
         self.map_key = map_key or NASA_FIRMS_MAP_KEY
-        if not self.map_key:
-            raise ValueError("NASA FIRMS MAP_KEY tidak ditemukan! Mohon isi di file .env")
-        
         # Bounding box Kalimantan
         self.bbox_str = f"{KALIMANTAN_BBOX['min_lon']},{KALIMANTAN_BBOX['min_lat']},{KALIMANTAN_BBOX['max_lon']},{KALIMANTAN_BBOX['max_lat']}"
 
     def download_nrt_hotspots(self, days: int = 5, sensor: str = "VIIRS_NOAA20_NRT") -> pd.DataFrame:
         """
         Mengunduh titik api Near-Real-Time dari NASA FIRMS (rentang 1 sampai 10 hari).
+        Mendukung API key resmi, dan otomatis fallback ke direct open-access CSV jika key belum disetel.
         """
         print(f"[INFO] Mengunduh titik api FIRMS ({sensor}) untuk {days} hari terakhir...")
-        url = f"https://firms.modaps.eosdis.nasa.gov/api/area/csv/{self.map_key}/{sensor}/{self.bbox_str}/{days}"
-        
-        resp = requests.get(url, timeout=30)
-        resp.raise_for_status()
+        df = None
 
-        df = pd.read_csv(io.StringIO(resp.text))
-        print(f"[OK] Berhasil mengunduh {len(df):,} baris titik api mentah.")
-        
+        # Jalur 1: Menggunakan NASA FIRMS API Key resmi jika tersedia
+        if self.map_key and len(self.map_key.strip()) > 5:
+            try:
+                url = f"https://firms.modaps.eosdis.nasa.gov/api/area/csv/{self.map_key}/{sensor}/{self.bbox_str}/{days}"
+                resp = requests.get(url, timeout=30)
+                if resp.status_code == 200 and not resp.text.startswith("Error"):
+                    df = pd.read_csv(io.StringIO(resp.text))
+                    print(f"[OK] Berhasil mengunduh via FIRMS API ({len(df):,} baris).")
+            except Exception as e:
+                print(f"[WARN] Akses FIRMS API Key kendala: {e}. Mengalihkan ke open feed publik...")
+
+        # Jalur 2: Fallback ke open-access direct feed South East Asia (tanpa key)
+        if df is None or df.empty:
+            print("[INFO] Mengunduh feed publik open-access NASA FIRMS South East Asia...")
+            feed_urls = [
+                "https://firms.modaps.eosdis.nasa.gov/data/active_fire/noaa-20-viirs-nrt/csv/J1_VIIRS_C2_SouthEast_Asia_7d.csv",
+                "https://firms.modaps.eosdis.nasa.gov/data/active_fire/suomi-npp-viirs-nrt/csv/SUOMI_VIIRS_C2_SouthEast_Asia_7d.csv"
+            ]
+            for feed_url in feed_urls:
+                try:
+                    resp = requests.get(feed_url, timeout=35, headers={"User-Agent": "Mozilla/5.0"})
+                    if resp.status_code == 200:
+                        df_raw = pd.read_csv(io.StringIO(resp.text))
+                        # Filter koordinat sesuai Bounding Box Kalimantan
+                        mask = (
+                            (df_raw["latitude"] >= KALIMANTAN_BBOX["min_lat"]) &
+                            (df_raw["latitude"] <= KALIMANTAN_BBOX["max_lat"]) &
+                            (df_raw["longitude"] >= KALIMANTAN_BBOX["min_lon"]) &
+                            (df_raw["longitude"] <= KALIMANTAN_BBOX["max_lon"])
+                        )
+                        df = df_raw[mask].copy()
+                        print(f"[OK] Berhasil mengunduh via open feed NASA ({len(df):,} titik di Kalimantan).")
+                        break
+                except Exception as ex:
+                    print(f"[WARN] Open feed {feed_url} gagal: {ex}")
+
+        if df is None or df.empty:
+            raise RuntimeError("Gagal mengunduh titik api dari seluruh sumber NASA FIRMS (API maupun open feed).")
+
         # Simpan file mentah
         raw_file = RAW_DATA_DIR / f"firms_{sensor}_latest_{days}d.csv"
         df.to_csv(raw_file, index=False)
@@ -156,14 +187,32 @@ class FIRMSDownloader:
         print("[INFO] Membaca Master Grid 5 km Kalimantan...")
         gdf_grid = gpd.read_parquet(grid_parquet_path)
 
-        # 1. Cleaning: Filter keyakinan (Confidence) & FRP
-        print("[INFO] Membersihkan titik api mentah...")
+        # 1. Cleaning: Filter keyakinan (Confidence), FRP, dan DayNight
+        print("[INFO] Membersihkan titik api mentah (V2 — filter lebih ketat)...")
         initial_len = len(df_hotspots)
-        
-        # Jika kolom confidence bernilai string 'l', 'n', 'h' (low, nominal, high) atau numerik
+
+        # V2: Deduplikasi eksplisit pada koordinat + waktu
+        dedup_cols = [c for c in ["latitude", "longitude", "acq_date", "acq_time"] if c in df_hotspots.columns]
+        if dedup_cols:
+            before_dedup = len(df_hotspots)
+            df_hotspots = df_hotspots.drop_duplicates(subset=dedup_cols).copy()
+            dropped_dup = before_dedup - len(df_hotspots)
+            if dropped_dup > 0:
+                print(f"  [DEDUP] Menghapus {dropped_dup:,} baris duplikat (lat+lon+date+time).")
+
+        # V2: Preferensi deteksi siang hari (daynight = "D")
+        # Deteksi malam hari lebih rentan false positive dari sumber panas non-api
+        if "daynight" in df_hotspots.columns:
+            day_count = (df_hotspots["daynight"].str.upper() == "D").sum()
+            night_count = (df_hotspots["daynight"].str.upper() == "N").sum()
+            # Hanya filter jika ada cukup data siang (>30%)
+            if day_count > 0 and day_count / max(1, len(df_hotspots)) > 0.3:
+                df_hotspots = df_hotspots[df_hotspots["daynight"].str.upper() == "D"].copy()
+                print(f"  [DAYNIGHT] Memfilter deteksi siang hari saja: {day_count:,} siang, {night_count:,} malam dibuang.")
+
+        # Filter confidence (sudah ada, tetap dipertahankan)
         if "confidence" in df_hotspots.columns:
             conf_str = df_hotspots["confidence"].astype(str).str.lower()
-            # Cek apakah isinya angka (MODIS) atau huruf (VIIRS)
             numeric_conf = pd.to_numeric(df_hotspots["confidence"], errors="coerce")
             if numeric_conf.notna().any():
                 df_clean = df_hotspots[numeric_conf >= 50].copy()
@@ -172,11 +221,11 @@ class FIRMSDownloader:
         else:
             df_clean = df_hotspots.copy()
 
-        # Filter FRP > 0
+        # V2: Filter FRP >= 0.5 (lebih ketat — FRP mendekati 0 sering false detection)
         if "frp" in df_clean.columns:
-            df_clean = df_clean[df_clean["frp"] > 0]
+            df_clean = df_clean[df_clean["frp"] >= 0.5]
 
-        print(f"[CLEAN] Setelah filter keyakinan & FRP: {len(df_clean):,} titik api (dari {initial_len:,}).")
+        print(f"[CLEAN] Setelah filter V2: {len(df_clean):,} titik api (dari {initial_len:,}, terhapus {initial_len - len(df_clean):,}).")
 
         # 2. Spatial Join: Titik koordinat ke Poligon Kotak 5 km
         gdf_points = gpd.GeoDataFrame(
@@ -191,7 +240,6 @@ class FIRMSDownloader:
         joined = gpd.sjoin(gdf_points, gdf_grid[["grid_id", "geometry"]], how="inner", predicate="within")
 
         # Agregasi harian per grid
-        # Kolom tanggal acq_date (YYYY-MM-DD)
         summary = joined.groupby(["grid_id", "acq_date"]).agg(
             hotspot_count=("frp", "count"),
             max_frp=("frp", "max"),

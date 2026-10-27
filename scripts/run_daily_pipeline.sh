@@ -1,7 +1,7 @@
 #!/bin/bash
 # ==============================================================================
 # BORNEO SIAGA - Production Daily Pipeline Runner
-# Menjalankan penarikan satelit FIRMS NRT, cuaca Open-Meteo, rekayasa 16 fitur,
+# Menjalankan penarikan satelit FIRMS NRT, cuaca Open-Meteo, rekayasa 47 fitur,
 # inferensi XGBoost untuk 22.276 kotak Kalimantan, dan Daily Validation Tracker.
 # ==============================================================================
 

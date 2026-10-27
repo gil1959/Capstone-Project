@@ -26,12 +26,13 @@ Thumbs.db
 # Large Historical Datasets (Melebihi Batas GitHub 100 MB)
 data/processed/training_dataset*.parquet
 data/processed/weather_*.parquet
-data/raw/firms_cache_*
-data/raw/weather_anchor_cache_*
-data/raw/weather_cache_*
-data/raw/weather_daily_cache_*
+data/processed/hotspots_snapped_20*.parquet
+data/raw/*
+!data/raw/.gitkeep
 
-# Optional Historical GeoJSON scenarios (keep only latest/sample)
-data/processed/fire_warning_kalimantan_2024-09-06.geojson
-data/processed/fire_warning_kalimantan_2024-09-14.geojson
-data/processed/fire_warning_kalimantan_2024-12-31.geojson
+# Generated Daily GeoJSON (Dibuat otomatis oleh runner di VPS, jangan di-push ke Git)
+data/processed/*.geojson
+
+# Logs & Temporary Files
+logs/
+*.log

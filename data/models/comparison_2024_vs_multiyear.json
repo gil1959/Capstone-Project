@@ -1,0 +1,39 @@
+{
+  "model_2020_2024": {
+    "train_years": "2020-2024 (Multi-Tahun)",
+    "test_year": 2025,
+    "roc_auc": 0.9238,
+    "pr_auc": 0.093,
+    "threshold": 60.0,
+    "recall_pct": 65.32,
+    "precision_pct": 2.8,
+    "f1_score": 0.0538,
+    "tp": 9986,
+    "fn": 5302,
+    "fp": 346231,
+    "tn": 7457357
+  },
+  "model_2024_only": {
+    "train_years": "2024 (Tunggal)",
+    "test_year": 2025,
+    "roc_auc": 0.9099,
+    "pr_auc": 0.0732,
+    "threshold_f2": 82.8,
+    "recall_pct": 35.52,
+    "precision_pct": 8.02,
+    "f1_score": 0.1309,
+    "tp": 5430,
+    "fn": 9858,
+    "fp": 62236,
+    "tn": 7741352,
+    "at_60_threshold": {
+      "recall_pct": 57.91,
+      "precision_pct": 3.14,
+      "f1_score": 0.0596,
+      "tp": 8853,
+      "fn": 6435,
+      "fp": 272920,
+      "tn": 7530668
+    }
+  }
+}

@@ -1,5 +1,7 @@
 {
   "algorithm": "XGBoost",
+  "version": "2.1-Thermo",
+  "description": "Model Terbaik dan Seimbang XGBoost Tunggal (47 Fitur Termodinamika & Data Bersih)",
   "xgboost_version": "3.4.1",
   "features": [
     "temp_max",
@@ -11,85 +13,52 @@
     "rain_sum_7d",
     "rain_sum_14d",
     "temp_max_7d_avg",
+    "temp_max_3d_avg",
     "dry_days_count",
+    "vpd_7d_avg",
+    "vpd_14d_avg",
+    "consecutive_hot_days",
+    "soil_moisture_diff_7d",
+    "soil_moisture_min_7d",
+    "kbdi_proxy",
     "hotspot_count",
     "max_frp",
     "hotspot_lag_1d",
+    "hotspot_count_3d",
+    "hotspot_count_7d",
+    "hotspot_count_14d",
+    "max_frp_7d",
+    "has_fire_last_3d",
+    "has_fire_last_7d",
+    "neighbor_fire_count",
+    "neighbor_max_frp",
+    "neighbor_total_hotspots",
+    "neighbor_fire_count_3d",
+    "month_sin",
+    "month_cos",
+    "is_dry_season",
+    "day_of_year_norm",
     "elevation",
     "peat_coverage_pct",
-    "peat_dryness_factor"
+    "peat_dryness_factor",
+    "peat_x_vpd",
+    "peat_x_dry_days",
+    "peat_x_temp",
+    "distance_to_road_km",
+    "road_x_peat",
+    "road_x_dry_days",
+    "compound_drought_index",
+    "soil_drying_gradient",
+    "fire_cluster_momentum",
+    "peat_road_hazard"
   ],
-  "threshold_sedang": 28.4,
-  "threshold_tinggi": 38.4,
-  "pr_auc": 0.0673,
-  "roc_auc": 0.8269,
-  "scale_pos_weight": 13.5,
-  "confusion_matrix": {
-    "true_positive": 2179,
-    "false_negative": 8420,
-    "false_positive": 14335,
-    "true_negative": 4987436,
-    "fire_recall_pct": 20.558543258798
-  },
-  "classification_report": {
-    "AMAN (0)": {
-      "precision": 0.998314603143085,
-      "recall": 0.9971340151318403,
-      "f1-score": 0.9977239598956833,
-      "support": 5001771.0
-    },
-    "API (1)": {
-      "precision": 0.13194864963061645,
-      "recall": 0.20558543258798,
-      "f1-score": 0.16073470291004316,
-      "support": 10599.0
-    },
-    "accuracy": 0.9954602313875472,
-    "macro avg": {
-      "precision": 0.5651316263868507,
-      "recall": 0.6013597238599102,
-      "f1-score": 0.5792293314028633,
-      "support": 5012370.0
-    },
-    "weighted avg": {
-      "precision": 0.9964826129385952,
-      "recall": 0.9954602313875472,
-      "f1-score": 0.9959540887299891,
-      "support": 5012370.0
-    }
-  },
-  "top_features": [
-    {
-      "feature": "max_frp",
-      "importance_gain": 0.3028516173362732
-    },
-    {
-      "feature": "hotspot_count",
-      "importance_gain": 0.210855171084404
-    },
-    {
-      "feature": "rain_sum_14d",
-      "importance_gain": 0.14412443339824677
-    },
-    {
-      "feature": "hotspot_lag_1d",
-      "importance_gain": 0.05935818329453468
-    },
-    {
-      "feature": "vpd_max",
-      "importance_gain": 0.05854606628417969
-    },
-    {
-      "feature": "rain_sum",
-      "importance_gain": 0.04835369065403938
-    },
-    {
-      "feature": "rain_sum_7d",
-      "importance_gain": 0.04818825423717499
-    },
-    {
-      "feature": "dry_days_count",
-      "importance_gain": 0.04252976179122925
-    }
-  ]
+  "features_count": 47,
+  "threshold_sedang": 60.0,
+  "threshold_tinggi": 85.0,
+  "scale_pos_weight": 7.5,
+  "pr_auc": 0.09467923414007108,
+  "roc_auc": 0.9316781155433693,
+  "ensemble_weights": {
+    "xgboost": 1.0
+  }
 }

@@ -1,5 +1,6 @@
 {
   "algorithm": "XGBoost",
+  "version": "2.1-Thermo",
   "xgboost_version": "3.4.1",
   "features": [
     "temp_max",
@@ -11,85 +12,268 @@
     "rain_sum_7d",
     "rain_sum_14d",
     "temp_max_7d_avg",
+    "temp_max_3d_avg",
     "dry_days_count",
+    "vpd_7d_avg",
+    "vpd_14d_avg",
+    "consecutive_hot_days",
+    "soil_moisture_diff_7d",
+    "soil_moisture_min_7d",
+    "kbdi_proxy",
     "hotspot_count",
     "max_frp",
     "hotspot_lag_1d",
+    "hotspot_count_3d",
+    "hotspot_count_7d",
+    "hotspot_count_14d",
+    "max_frp_7d",
+    "has_fire_last_3d",
+    "has_fire_last_7d",
+    "neighbor_fire_count",
+    "neighbor_max_frp",
+    "neighbor_total_hotspots",
+    "neighbor_fire_count_3d",
+    "month_sin",
+    "month_cos",
+    "is_dry_season",
+    "day_of_year_norm",
     "elevation",
     "peat_coverage_pct",
-    "peat_dryness_factor"
+    "peat_dryness_factor",
+    "peat_x_vpd",
+    "peat_x_dry_days",
+    "peat_x_temp",
+    "distance_to_road_km",
+    "road_x_peat",
+    "road_x_dry_days",
+    "compound_drought_index",
+    "soil_drying_gradient",
+    "fire_cluster_momentum",
+    "peat_road_hazard"
   ],
-  "threshold_sedang": 28.4,
-  "threshold_tinggi": 38.4,
-  "pr_auc": 0.0673,
-  "roc_auc": 0.8269,
-  "scale_pos_weight": 13.5,
+  "threshold_sedang": 60.0,
+  "threshold_tinggi": 85.0,
+  "scale_pos_weight": 7.5,
+  "pr_auc": 0.09467923414007108,
+  "roc_auc": 0.9316781155433693,
   "confusion_matrix": {
-    "true_positive": 2179,
-    "false_negative": 8420,
-    "false_positive": 14335,
-    "true_negative": 4987436,
-    "fire_recall_pct": 20.558543258798
+    "true_positive": 9819,
+    "false_negative": 5469,
+    "false_positive": 298593,
+    "true_negative": 7504995,
+    "fire_recall_pct": 64.23,
+    "precision_pct": 3.18,
+    "f1_score": 0.0607
   },
   "classification_report": {
     "AMAN (0)": {
-      "precision": 0.998314603143085,
-      "recall": 0.9971340151318403,
-      "f1-score": 0.9977239598956833,
-      "support": 5001771.0
+      "precision": 0.9992718159623692,
+      "recall": 0.9617364473880476,
+      "f1-score": 0.9801449022113807,
+      "support": 7803588.0
     },
     "API (1)": {
-      "precision": 0.13194864963061645,
-      "recall": 0.20558543258798,
-      "f1-score": 0.16073470291004316,
-      "support": 10599.0
+      "precision": 0.03183728259600794,
+      "recall": 0.6422684458398744,
+      "f1-score": 0.060667284522706214,
+      "support": 15288.0
     },
-    "accuracy": 0.9954602313875472,
-    "macro avg": {
-      "precision": 0.5651316263868507,
-      "recall": 0.6013597238599102,
-      "f1-score": 0.5792293314028633,
-      "support": 5012370.0
-    },
+    "accuracy": 0.9611118017474635,
     "weighted avg": {
-      "precision": 0.9964826129385952,
-      "recall": 0.9954602313875472,
-      "f1-score": 0.9959540887299891,
-      "support": 5012370.0
+      "precision": 0.9967,
+      "recall": 0.9935,
+      "f1-score": 0.9951,
+      "support": 7818876.0
     }
   },
   "top_features": [
     {
-      "feature": "max_frp",
-      "importance_gain": 0.3028516173362732
+      "feature": "fire_cluster_momentum",
+      "importance_gain": 0.41325007890942334
     },
     {
-      "feature": "hotspot_count",
-      "importance_gain": 0.210855171084404
+      "feature": "is_dry_season",
+      "importance_gain": 0.13341844143999979
     },
     {
-      "feature": "rain_sum_14d",
-      "importance_gain": 0.14412443339824677
+      "feature": "month_sin",
+      "importance_gain": 0.07785679453634572
     },
     {
-      "feature": "hotspot_lag_1d",
-      "importance_gain": 0.05935818329453468
+      "feature": "hotspot_count_14d",
+      "importance_gain": 0.0742309802393136
     },
     {
-      "feature": "vpd_max",
-      "importance_gain": 0.05854606628417969
+      "feature": "neighbor_fire_count_3d",
+      "importance_gain": 0.07392418773744874
+    },
+    {
+      "feature": "road_x_dry_days",
+      "importance_gain": 0.03258268821545289
+    },
+    {
+      "feature": "distance_to_road_km",
+      "importance_gain": 0.01742059650304922
+    },
+    {
+      "feature": "hotspot_count_7d",
+      "importance_gain": 0.01497276184842119
     },
     {
       "feature": "rain_sum",
-      "importance_gain": 0.04835369065403938
+      "importance_gain": 0.012870407413409595
+    },
+    {
+      "feature": "peat_coverage_pct",
+      "importance_gain": 0.011001063550789062
+    },
+    {
+      "feature": "kbdi_proxy",
+      "importance_gain": 0.009919164244684186
+    },
+    {
+      "feature": "max_frp_7d",
+      "importance_gain": 0.008882763385035774
+    },
+    {
+      "feature": "compound_drought_index",
+      "importance_gain": 0.007992160747059135
+    },
+    {
+      "feature": "neighbor_max_frp",
+      "importance_gain": 0.006685456016542869
+    },
+    {
+      "feature": "elevation",
+      "importance_gain": 0.006543158677305673
+    },
+    {
+      "feature": "has_fire_last_7d",
+      "importance_gain": 0.005844134196350831
+    },
+    {
+      "feature": "day_of_year_norm",
+      "importance_gain": 0.005775605761394407
+    },
+    {
+      "feature": "peat_dryness_factor",
+      "importance_gain": 0.0046664317011092865
+    },
+    {
+      "feature": "temp_max",
+      "importance_gain": 0.004455149683349109
+    },
+    {
+      "feature": "rain_sum_14d",
+      "importance_gain": 0.0044043510687669625
+    },
+    {
+      "feature": "soil_moisture_0_7cm",
+      "importance_gain": 0.004239592507791604
+    },
+    {
+      "feature": "temp_max_3d_avg",
+      "importance_gain": 0.0041137850629155304
+    },
+    {
+      "feature": "month_cos",
+      "importance_gain": 0.00396986355447114
+    },
+    {
+      "feature": "vpd_14d_avg",
+      "importance_gain": 0.003939846273538716
+    },
+    {
+      "feature": "soil_drying_gradient",
+      "importance_gain": 0.003786641420581475
+    },
+    {
+      "feature": "road_x_peat",
+      "importance_gain": 0.0035550100714066804
+    },
+    {
+      "feature": "neighbor_total_hotspots",
+      "importance_gain": 0.0035251733341219267
     },
     {
       "feature": "rain_sum_7d",
-      "importance_gain": 0.04818825423717499
+      "importance_gain": 0.00347319304508429
+    },
+    {
+      "feature": "temp_max_7d_avg",
+      "importance_gain": 0.003453141845865424
+    },
+    {
+      "feature": "vpd_max",
+      "importance_gain": 0.003415232021585767
+    },
+    {
+      "feature": "max_frp",
+      "importance_gain": 0.0030558162926834593
+    },
+    {
+      "feature": "soil_moisture_diff_7d",
+      "importance_gain": 0.003039985256002511
+    },
+    {
+      "feature": "soil_moisture_min_7d",
+      "importance_gain": 0.0028337637066353882
+    },
+    {
+      "feature": "peat_x_vpd",
+      "importance_gain": 0.002831862752076556
+    },
+    {
+      "feature": "vpd_7d_avg",
+      "importance_gain": 0.002766037406482339
+    },
+    {
+      "feature": "soil_moisture_7_28cm",
+      "importance_gain": 0.0026394817366295485
+    },
+    {
+      "feature": "peat_x_temp",
+      "importance_gain": 0.0025738817992367307
+    },
+    {
+      "feature": "neighbor_fire_count",
+      "importance_gain": 0.002542691708216288
+    },
+    {
+      "feature": "wind_speed_max",
+      "importance_gain": 0.0023722604947760168
+    },
+    {
+      "feature": "hotspot_count",
+      "importance_gain": 0.0022917398369698603
+    },
+    {
+      "feature": "peat_road_hazard",
+      "importance_gain": 0.001972922730178189
     },
     {
       "feature": "dry_days_count",
-      "importance_gain": 0.04252976179122925
+      "importance_gain": 0.0018193173525356363
+    },
+    {
+      "feature": "peat_x_dry_days",
+      "importance_gain": 0.0014188889993807167
+    },
+    {
+      "feature": "consecutive_hot_days",
+      "importance_gain": 0.001351375805857883
+    },
+    {
+      "feature": "has_fire_last_3d",
+      "importance_gain": 0.0009934412403977567
+    },
+    {
+      "feature": "hotspot_count_3d",
+      "importance_gain": 0.000899710051931014
+    },
+    {
+      "feature": "hotspot_lag_1d",
+      "importance_gain": 0.000428967817396146
     }
   ]
 }

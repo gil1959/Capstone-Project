@@ -261,10 +261,6 @@ def get_stakeholder_html():
             __INITIAL_DATE_TITLE__
         </div>
         <div style="margin-top: 6px; display: flex; align-items: center; gap: 10px; flex-wrap: wrap;">
-            <button type="button" onclick="showModalDialog('modal-daily-eval', event)" id="header-eval-badge-stk" style="background: rgba(56, 189, 248, 0.15); border: 1px solid #38bdf8; color: #38bdf8; font-size: 11px; font-weight: 700; padding: 2px 8px; border-radius: 5px; cursor: pointer; display: inline-flex; align-items: center; gap: 5px; white-space: nowrap;">
-                <svg class="icon-svg" style="width: 12px; height: 12px;" viewBox="0 0 24 24"><path d="M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41z"/></svg>
-                <span id="header-eval-rate-stk">Eval Daily: 86.6% Recall</span>
-            </button>
             <div class="risk-chips" id="summary-chips" style="margin-top: 0; display: inline-flex; align-items: center; gap: 10px;">
                 <span class="chip"><span class="chip-dot" style="background: #22c55e;"></span> Rendah: Memuat...</span>
                 <span class="chip"><span class="chip-dot" style="background: #facc15;"></span> Sedang: Memuat...</span>
@@ -312,11 +308,7 @@ def get_stakeholder_html():
             <span>Tanggal</span>
         </button>
 
-        <!-- Eval Daily Satgas -->
-        <button type="button" class="tool-btn" style="border-color: #38bdf8; color: #38bdf8;" onclick="showModalDialog('modal-daily-eval', event)">
-            <svg class="icon-svg" viewBox="0 0 24 24"><path d="M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41z"/></svg>
-            <span>Eval Daily</span>
-        </button>
+
 
         <!-- Use Case 3: Melihat riwayat tren risiko -->
         <button type="button" class="tool-btn tool-btn-primary" onclick="showModalDialog('modal-tren-risiko', event)">
@@ -1152,9 +1144,6 @@ def get_stakeholder_html():
                     }
                     if (document.getElementById('eval-status-badge-stk') && latest) {
                         document.getElementById('eval-status-badge-stk').innerText = (latest.operational_status || 'OPTIMAL').toUpperCase();
-                    }
-                    if (document.getElementById('header-eval-rate-stk') && latest) {
-                        document.getElementById('header-eval-rate-stk').innerText = `Eval Daily: ${latest.daily_capture_rate_pct}% Recall`;
                     }
                 })
                 .catch(() => {});

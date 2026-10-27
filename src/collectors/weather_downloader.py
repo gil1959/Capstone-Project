@@ -8,6 +8,7 @@ Mendukung:
 import sys
 from pathlib import Path
 import time
+from datetime import datetime, timezone, timedelta
 import requests
 import pandas as pd
 from tqdm import tqdm
@@ -125,11 +126,21 @@ class WeatherDownloader:
                             print(f"[RATE LIMIT 429] Limit per menit tercapai pada batch {batch_idx}. Istirahat 65 detik...")
                             time.sleep(65)
                     else:
+                        last_err = f"HTTP {resp.status_code}: {resp.text[:200]}"
+                        print(f"  [WARN Batch {batch_idx} Attempt {attempt+1}] {last_err}")
                         time.sleep(2)
                 except Exception as e:
                     if "Daily Limit Exceeded" in str(e):
                         raise e
+                    last_err = str(e)
+                    print(f"  [WARN Batch {batch_idx} Attempt {attempt+1}] Error: {last_err}")
                     time.sleep(2)
+
+            if not batch_records:
+                raise RuntimeError(
+                    f"[ERROR] Gagal mengunduh cuaca batch {batch_idx}/{total_batches} setelah {max_retries} percobaan. "
+                    f"Pesan error: {last_err}"
+                )
 
             if batch_file and batch_records:
                 pd.DataFrame(batch_records).to_parquet(batch_file)

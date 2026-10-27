@@ -8,6 +8,7 @@ Riwayat Penarikan Data Harian yang diambil langsung secara dinamis dari file sis
 
 import os
 import time
+import json
 from pathlib import Path
 import pandas as pd
 from src.config import RAW_DATA_DIR, PROCESSED_DATA_DIR, MODELS_DIR
@@ -55,38 +56,57 @@ def get_actual_daily_ingestion_data():
             "detail": detail
         })
 
-    # 2. FIRMS SP Historis Parquet
-    firms_sp = RAW_DATA_DIR / "firms_VIIRS_NOAA20_SP_2023_2024.parquet"
-    if firms_sp.exists():
-        stat = firms_sp.stat()
+    # 2. Hotspots Snapped Historis Multi-Tahun (2020 - 2025)
+    hs_multi = PROCESSED_DATA_DIR / "hotspots_snapped_2020_2025.parquet"
+    if hs_multi.exists():
+        stat = hs_multi.stat()
         mtime = time.strftime("%d %b %Y, %H:%M:%S WIB", time.localtime(stat.st_mtime))
         size_mb = f"{stat.st_size / (1024 * 1024):.2f} MB"
         records.append({
-            "sumber": "NASA FIRMS (Arsip Historis SP)",
-            "file": "data/raw/firms_VIIRS_NOAA20_SP_2023_2024.parquet",
+            "sumber": "NASA FIRMS (Multi-Tahun 2020 - 2025)",
+            "file": "data/processed/hotspots_snapped_2020_2025.parquet",
             "mtime": mtime,
             "size": size_mb,
-            "rows": "62.192 titik",
-            "range": "01 Jan 2023 s/d 31 Des 2024",
-            "status": "Terverifikasi",
-            "detail": "Data saintifik standar Science Quality (SP) kalibrasi penuh"
+            "rows": "103.295 titik",
+            "range": "01 Jan 2020 s/d 31 Des 2025 (6 Tahun)",
+            "status": "Terverifikasi SP",
+            "detail": "Data titik api satelit VIIRS Science Quality (SP) penuh 6 tahun"
         })
 
-    # 3. Weather Daily Cache & Historis
-    weather_p = PROCESSED_DATA_DIR / "weather_2023_2024.parquet"
+    # 3. Weather Reanalysis Historis (2020 - 2025)
+    weather_p = PROCESSED_DATA_DIR / "weather_2020_2025.parquet"
+    if not weather_p.exists():
+        weather_p = PROCESSED_DATA_DIR / "weather_2023_2024.parquet"
     if weather_p.exists():
         stat = weather_p.stat()
         mtime = time.strftime("%d %b %Y, %H:%M:%S WIB", time.localtime(stat.st_mtime))
         size_mb = f"{stat.st_size / (1024 * 1024):.2f} MB"
         records.append({
-            "sumber": "Open-Meteo ERA5 Land Weather",
-            "file": "data/processed/weather_2023_2024.parquet",
+            "sumber": "Open-Meteo ERA5 Land Weather (6 Tahun)",
+            "file": f"data/processed/{weather_p.name}",
             "mtime": mtime,
             "size": size_mb,
-            "rows": "10.011.045 baris",
-            "range": "731 hari (2023 - 2024)",
+            "rows": "36.671.337 baris",
+            "range": "2.192 hari (2020 - 2025)",
             "status": "Cache Siap",
-            "detail": "Suhu, angin, curah hujan harian & kumulatif, VPD, kelembapan tanah"
+            "detail": "Suhu maks, curah hujan harian & kumulatif, VPD, kelembapan tanah ERA5"
+        })
+
+    # 3b. Dataset Fitur Uji Out-of-Time 2025
+    train_2025 = PROCESSED_DATA_DIR / "training_dataset_2025.parquet"
+    if train_2025.exists():
+        stat = train_2025.stat()
+        mtime = time.strftime("%d %b %Y, %H:%M:%S WIB", time.localtime(stat.st_mtime))
+        size_mb = f"{stat.st_size / (1024 * 1024):.2f} MB"
+        records.append({
+            "sumber": "Dataset Fitur Uji Out-of-Time 2025",
+            "file": "data/processed/training_dataset_2025.parquet",
+            "mtime": mtime,
+            "size": size_mb,
+            "rows": "7.818.876 baris",
+            "range": "365 hari penuh (Tahun 2025)",
+            "status": "Siap Evaluasi",
+            "detail": "47 fitur spatio-temporal & termodinamika lengkap dengan label ground-truth api H+1"
         })
 
     # 4. Master Grid Enriched
@@ -120,7 +140,7 @@ def get_actual_daily_ingestion_data():
             "rows": "22.276 poligon grid",
             "range": "Prediksi H+1",
             "status": "Aktif",
-            "detail": "Siap dirender di Leaflet Web GIS publik dan stakeholder"
+            "detail": "Siap dirender di Leaflet Web GIS peta peringatan dini karhutla"
         })
 
     return records
@@ -155,6 +175,483 @@ def get_daily_evaluation_rows_html() -> str:
         return "<tr><td colspan='7' style='text-align:center;'>Gagal membaca data evaluasi harian</td></tr>"
 
 
+FEATURE_METADATA = {
+    "fire_cluster_momentum": {
+        "kategori": "Termodinamika & Klaster Spasial",
+        "badge_color": "background:#4c0519; color:#f43f5e; border:1px solid #e11d48;",
+        "sumber": "Rekayasa Spasio-temporal<br><small style='color:#94a3b8;'>Hotspot 3D + Tetangga</small>",
+        "sifat": "Dinamis (Harian)",
+        "satuan": "Skor",
+        "deskripsi": "Momentum klaster api lokal (bobot 2x hotspot 3d + api tetangga). Menjadi prediktor paling dominan."
+    },
+    "is_dry_season": {
+        "kategori": "Musiman & Iklim",
+        "badge_color": "background:#713f12; color:#facc15; border:1px solid #ca8a04;",
+        "sumber": "Klimatologi BMKG<br><small style='color:#94a3b8;'>Kalender Iklim Tropis</small>",
+        "sifat": "Dinamis (Biner)",
+        "satuan": "Flag (0/1)",
+        "deskripsi": "Fase puncak kemarau pulau Kalimantan (Juli s/d Oktober saat curah hujan anjlok)."
+    },
+    "month_sin": {
+        "kategori": "Musiman & Siklus",
+        "badge_color": "background:#0c4a6e; color:#38bdf8; border:1px solid #0284c7;",
+        "sumber": "Kalender Astronomis<br><small style='color:#94a3b8;'>Transformasi Siklik</small>",
+        "sifat": "Dinamis (Harian)",
+        "satuan": "Rasio [-1, 1]",
+        "deskripsi": "Transformasi sinus bulan dalam setahun untuk menangkap siklus tahunan tanpa batas buatan."
+    },
+    "hotspot_count_14d": {
+        "kategori": "Satelit Api Historis",
+        "badge_color": "background:#451a03; color:#fb923c; border:1px solid #ea580c;",
+        "sumber": "NASA FIRMS<br><small style='color:#94a3b8;'>Sensor VIIRS NOAA-20</small>",
+        "sifat": "Dinamis (Harian)",
+        "satuan": "Titik",
+        "deskripsi": "Akumulasi titik api 14 hari ke belakang (indikator utama persistensi kebakaran aktif)."
+    },
+    "neighbor_fire_count_3d": {
+        "kategori": "Spasial Spreading",
+        "badge_color": "background:#4c0519; color:#f43f5e; border:1px solid #e11d48;",
+        "sumber": "Rekayasa Spasial KD-Tree<br><small style='color:#94a3b8;'>8 Grid Tetangga 5 km</small>",
+        "sifat": "Dinamis (Harian)",
+        "satuan": "Titik",
+        "deskripsi": "Jumlah titik api di 8 kotak tetangga sekitar dalam 3 hari (vektor penyebaran api darat)."
+    },
+    "road_x_dry_days": {
+        "kategori": "Antropogenik & Iklim",
+        "badge_color": "background:#701a75; color:#f472b6; border:1px solid #c026d3;",
+        "sumber": "OSM x ERA5-Land<br><small style='color:#94a3b8;'>Aksesibilitas x Kekeringan</small>",
+        "sifat": "Dinamis (Harian)",
+        "satuan": "Indeks",
+        "deskripsi": "Interaksi kedekatan akses jalan dengan durasi hari tanpa hujan (aktivitas manusia saat kemarau)."
+    },
+    "distance_to_road_km": {
+        "kategori": "Antropogenik Spasial",
+        "badge_color": "background:#3b0764; color:#c084fc; border:1px solid #9333ea;",
+        "sumber": "OpenStreetMap<br><small style='color:#94a3b8;'>Jaringan Jalan Kalimantan</small>",
+        "sifat": "Statis (Spasial)",
+        "satuan": "km",
+        "deskripsi": "Jarak terdekat ke koridor infrastruktur jalan (aksesibilitas pembukaan lahan oleh manusia)."
+    },
+    "hotspot_count_7d": {
+        "kategori": "Satelit Api Historis",
+        "badge_color": "background:#451a03; color:#fb923c; border:1px solid #ea580c;",
+        "sumber": "NASA FIRMS<br><small style='color:#94a3b8;'>Sensor VIIRS NOAA-20</small>",
+        "sifat": "Dinamis (Harian)",
+        "satuan": "Titik",
+        "deskripsi": "Akumulasi titik api 7 hari terakhir dalam kotak 5 km."
+    },
+    "rain_sum": {
+        "kategori": "Cuaca Terkini",
+        "badge_color": "background:#0c4a6e; color:#38bdf8; border:1px solid #0284c7;",
+        "sumber": "Open-Meteo API<br><small style='color:#94a3b8;'>Reanalisis ERA5-Land</small>",
+        "sifat": "Dinamis (Harian)",
+        "satuan": "mm",
+        "deskripsi": "Curah hujan harian terkini pada tanggal observasi."
+    },
+    "peat_coverage_pct": {
+        "kategori": "Tutupan Biofisik",
+        "badge_color": "background:#365314; color:#a3e635; border:1px solid #65a30d;",
+        "sumber": "Peta Gambut KLHK<br><small style='color:#94a3b8;'>Peta Spasial Nasional</small>",
+        "sifat": "Statis (Spasial)",
+        "satuan": "%",
+        "deskripsi": "Persentase tutupan lahan gambut dalam grid 5 km (bahan bakar karbon bawah permukaan)."
+    },
+    "kbdi_proxy": {
+        "kategori": "Indeks Kekeringan",
+        "badge_color": "background:#713f12; color:#facc15; border:1px solid #ca8a04;",
+        "sumber": "Keetch-Byram Formula<br><small style='color:#94a3b8;'>Kombinasi Suhu & Hujan</small>",
+        "sifat": "Dinamis (Harian)",
+        "satuan": "Indeks",
+        "deskripsi": "Indeks kekeringan komposit Keetch-Byram (daya bakar lapisan serasah dan gambut)."
+    },
+    "max_frp_7d": {
+        "kategori": "Satelit Api Intensitas",
+        "badge_color": "background:#451a03; color:#fb923c; border:1px solid #ea580c;",
+        "sumber": "NASA FIRMS<br><small style='color:#94a3b8;'>Fire Radiative Power</small>",
+        "sifat": "Dinamis (Harian)",
+        "satuan": "MW",
+        "deskripsi": "Energi radiasi termal maksimum dalam 7 hari (intensitas kebakaran sebelumnya)."
+    },
+    "compound_drought_index": {
+        "kategori": "Termodinamika & Kekeringan",
+        "badge_color": "background:#4c0519; color:#f43f5e; border:1px solid #e11d48;",
+        "sumber": "Reanalisis ERA5-Land<br><small style='color:#94a3b8;'>VPD x Suhu / Hujan</small>",
+        "sifat": "Dinamis (Harian)",
+        "satuan": "Indeks",
+        "deskripsi": "Indeks gabungan kekeringan atmosfer dan defisit air tanah multi-mingguan."
+    },
+    "neighbor_max_frp": {
+        "kategori": "Spasial Intensitas",
+        "badge_color": "background:#4c0519; color:#f43f5e; border:1px solid #e11d48;",
+        "sumber": "Rekayasa Spasial KD-Tree<br><small style='color:#94a3b8;'>8 Grid Tetangga</small>",
+        "sifat": "Dinamis (Harian)",
+        "satuan": "MW",
+        "deskripsi": "Energi radiasi termal tertinggi di grid sekitar hari ini (jarak bahaya lompatan api)."
+    },
+    "elevation": {
+        "kategori": "Topografi Fisik",
+        "badge_color": "background:#134e4a; color:#2dd4bf; border:1px solid #0d9488;",
+        "sumber": "NASA SRTM DEM<br><small style='color:#94a3b8;'>Radar Interferometry</small>",
+        "sifat": "Statis (Topografi)",
+        "satuan": "m dpl",
+        "deskripsi": "Ketinggian tanah dpl (api terkonsentrasi di dataran rendah pesisir < 45 m)."
+    },
+    "has_fire_last_7d": {
+        "kategori": "Sejarah Kebakaran",
+        "badge_color": "background:#4c0519; color:#f43f5e; border:1px solid #e11d48;",
+        "sumber": "NASA FIRMS<br><small style='color:#94a3b8;'>Sensor VIIRS</small>",
+        "sifat": "Dinamis (Biner)",
+        "satuan": "Flag (0/1)",
+        "deskripsi": "Indikator biner apakah kotak grid pernah terbakar dalam 7 hari terakhir."
+    },
+    "day_of_year_norm": {
+        "kategori": "Temporal Siklik",
+        "badge_color": "background:#0c4a6e; color:#38bdf8; border:1px solid #0284c7;",
+        "sumber": "Kalender Julian Harian<br><small style='color:#94a3b8;'>Normalisasi Harian</small>",
+        "sifat": "Dinamis (Harian)",
+        "satuan": "Rasio [0, 1]",
+        "deskripsi": "Normalisasi hari ke-n dalam setahun (1-365) untuk melacak tren musiman berkelanjutan."
+    },
+    "peat_dryness_factor": {
+        "kategori": "Interaksi Biofisik",
+        "badge_color": "background:#4a044e; color:#f472b6; border:1px solid #c026d3;",
+        "sumber": "KLHK x Open-Meteo<br><small style='color:#94a3b8;'>Rekayasa Spasio-temporal</small>",
+        "sifat": "Dinamis (Harian)",
+        "satuan": "Rasio",
+        "deskripsi": "Interaksi: persentase tutupan gambut x kekeringan tanah permukaan."
+    },
+    "temp_max": {
+        "kategori": "Cuaca Terkini",
+        "badge_color": "background:#7c2d12; color:#fb923c; border:1px solid #ea580c;",
+        "sumber": "Open-Meteo API<br><small style='color:#94a3b8;'>Reanalisis ERA5-Land</small>",
+        "sifat": "Dinamis (Harian)",
+        "satuan": "°C",
+        "deskripsi": "Suhu udara maksimum harian pada grid."
+    },
+    "rain_sum_14d": {
+        "kategori": "Hidrologi Kumulatif",
+        "badge_color": "background:#0c4a6e; color:#38bdf8; border:1px solid #0284c7;",
+        "sumber": "Open-Meteo API<br><small style='color:#94a3b8;'>Reanalisis ERA5-Land</small>",
+        "sifat": "Dinamis (Harian)",
+        "satuan": "mm",
+        "deskripsi": "Akumulasi hujan 14 hari ke belakang (indikator penurunan muka air tanah)."
+    },
+    "soil_moisture_0_7cm": {
+        "kategori": "Kelembapan Tanah",
+        "badge_color": "background:#064e3b; color:#34d399; border:1px solid #059669;",
+        "sumber": "Open-Meteo API<br><small style='color:#94a3b8;'>Sensor Hidrologi ERA5</small>",
+        "sifat": "Dinamis (Harian)",
+        "satuan": "m³/m³",
+        "deskripsi": "Kadar air kelembapan tanah lapisan atas (permukaan 0 - 7 cm)."
+    },
+    "temp_max_3d_avg": {
+        "kategori": "Cuaca Bergerak",
+        "badge_color": "background:#7c2d12; color:#fb923c; border:1px solid #ea580c;",
+        "sumber": "Open-Meteo API<br><small style='color:#94a3b8;'>Reanalisis ERA5-Land</small>",
+        "sifat": "Dinamis (Harian)",
+        "satuan": "°C",
+        "deskripsi": "Rata-rata suhu maksimum 3 hari terakhir (akumulasi pemanasan permukaan)."
+    },
+    "month_cos": {
+        "kategori": "Musiman & Siklus",
+        "badge_color": "background:#0c4a6e; color:#38bdf8; border:1px solid #0284c7;",
+        "sumber": "Kalender Astronomis<br><small style='color:#94a3b8;'>Transformasi Siklik</small>",
+        "sifat": "Dinamis (Harian)",
+        "satuan": "Rasio [-1, 1]",
+        "deskripsi": "Transformasi kosinus bulan dalam setahun (komponen ortogonal siklus tahunan)."
+    },
+    "vpd_14d_avg": {
+        "kategori": "Atmosfer Kumulatif",
+        "badge_color": "background:#713f12; color:#facc15; border:1px solid #ca8a04;",
+        "sumber": "Open-Meteo API<br><small style='color:#94a3b8;'>Reanalisis ERA5-Land</small>",
+        "sifat": "Dinamis (Harian)",
+        "satuan": "kPa",
+        "deskripsi": "Rata-rata defisit tekanan uap air (VPD) selama 14 hari terakhir."
+    },
+    "soil_drying_gradient": {
+        "kategori": "Termodinamika Tanah",
+        "badge_color": "background:#4c0519; color:#f43f5e; border:1px solid #e11d48;",
+        "sumber": "Sensor ERA5-Land<br><small style='color:#94a3b8;'>Lapisan 0-7cm vs 7-28cm</small>",
+        "sifat": "Dinamis (Harian)",
+        "satuan": "Rasio",
+        "deskripsi": "Gradien laju pengeringan kelembapan antara tanah permukaan dan lapisan tanah dalam."
+    },
+    "road_x_peat": {
+        "kategori": "Antropogenik & Biofisik",
+        "badge_color": "background:#701a75; color:#f472b6; border:1px solid #c026d3;",
+        "sumber": "OSM x Peta Gambut KLHK<br><small style='color:#94a3b8;'>Akses x Cadangan Gambut</small>",
+        "sifat": "Statis (Spasial)",
+        "satuan": "Skor",
+        "deskripsi": "Interaksi kedekatan jalan dengan lahan gambut (zona rawan drainase kanal dan pembalakan liar)."
+    },
+    "neighbor_total_hotspots": {
+        "kategori": "Spasial Agregat",
+        "badge_color": "background:#4c0519; color:#f43f5e; border:1px solid #e11d48;",
+        "sumber": "Rekayasa Spasial KD-Tree<br><small style='color:#94a3b8;'>Radius Spasial Sekitar</small>",
+        "sifat": "Dinamis (Harian)",
+        "satuan": "Titik",
+        "deskripsi": "Total kumulatif titik api yang terdeteksi di seluruh lingkungan grid sekitar."
+    },
+    "rain_sum_7d": {
+        "kategori": "Hidrologi Kumulatif",
+        "badge_color": "background:#0c4a6e; color:#38bdf8; border:1px solid #0284c7;",
+        "sumber": "Open-Meteo API<br><small style='color:#94a3b8;'>Reanalisis ERA5-Land</small>",
+        "sifat": "Dinamis (Harian)",
+        "satuan": "mm",
+        "deskripsi": "Akumulasi curah hujan selama 7 hari terakhir."
+    },
+    "temp_max_7d_avg": {
+        "kategori": "Cuaca Bergerak",
+        "badge_color": "background:#7c2d12; color:#fb923c; border:1px solid #ea580c;",
+        "sumber": "Open-Meteo API<br><small style='color:#94a3b8;'>Reanalisis ERA5-Land</small>",
+        "sifat": "Dinamis (Harian)",
+        "satuan": "°C",
+        "deskripsi": "Rata-rata suhu maksimum 7 hari terakhir (efek akumulasi gelombang panas)."
+    },
+    "vpd_max": {
+        "kategori": "Atmosfer Terkini",
+        "badge_color": "background:#713f12; color:#facc15; border:1px solid #ca8a04;",
+        "sumber": "Open-Meteo API<br><small style='color:#94a3b8;'>Reanalisis ERA5-Land</small>",
+        "sifat": "Dinamis (Harian)",
+        "satuan": "kPa",
+        "deskripsi": "Defisit tekanan uap air maksimum harian (daya hisap udara menyedot kelembapan vegetasi)."
+    },
+    "max_frp": {
+        "kategori": "Satelit Api Terkini",
+        "badge_color": "background:#451a03; color:#fb923c; border:1px solid #ea580c;",
+        "sumber": "NASA FIRMS<br><small style='color:#94a3b8;'>Sensor VIIRS NOAA-20</small>",
+        "sifat": "Dinamis (Harian)",
+        "satuan": "MW",
+        "deskripsi": "Daya radiasi api maksimum yang terpantau pada hari observasi."
+    },
+    "soil_moisture_diff_7d": {
+        "kategori": "Hidrologi Gradien",
+        "badge_color": "background:#064e3b; color:#34d399; border:1px solid #059669;",
+        "sumber": "Open-Meteo API<br><small style='color:#94a3b8;'>Reanalisis ERA5-Land</small>",
+        "sifat": "Dinamis (Harian)",
+        "satuan": "m³/m³",
+        "deskripsi": "Selisih perubahan kelembapan tanah lapisan atas selama 7 hari terakhir."
+    },
+    "soil_moisture_min_7d": {
+        "kategori": "Hidrologi Ekstrem",
+        "badge_color": "background:#064e3b; color:#34d399; border:1px solid #059669;",
+        "sumber": "Open-Meteo API<br><small style='color:#94a3b8;'>Reanalisis ERA5-Land</small>",
+        "sifat": "Dinamis (Harian)",
+        "satuan": "m³/m³",
+        "deskripsi": "Nilai kelembapan tanah terendah (titik paling kritis) dalam 7 hari terakhir."
+    },
+    "peat_x_vpd": {
+        "kategori": "Interaksi Biofisik",
+        "badge_color": "background:#4a044e; color:#f472b6; border:1px solid #c026d3;",
+        "sumber": "KLHK x Open-Meteo ERA5<br><small style='color:#94a3b8;'>Gambut x VPD Udara</small>",
+        "sifat": "Dinamis (Harian)",
+        "satuan": "Rasio",
+        "deskripsi": "Interaksi tutupan gambut dengan tingkat defisit tekanan uap air atmosfer."
+    },
+    "vpd_7d_avg": {
+        "kategori": "Atmosfer Kumulatif",
+        "badge_color": "background:#713f12; color:#facc15; border:1px solid #ca8a04;",
+        "sumber": "Open-Meteo API<br><small style='color:#94a3b8;'>Reanalisis ERA5-Land</small>",
+        "sifat": "Dinamis (Harian)",
+        "satuan": "kPa",
+        "deskripsi": "Rata-rata defisit tekanan uap air (VPD) selama 7 hari terakhir."
+    },
+    "soil_moisture_7_28cm": {
+        "kategori": "Kelembapan Tanah Dalam",
+        "badge_color": "background:#064e3b; color:#34d399; border:1px solid #059669;",
+        "sumber": "Open-Meteo API<br><small style='color:#94a3b8;'>Sensor Hidrologi ERA5</small>",
+        "sifat": "Dinamis (Harian)",
+        "satuan": "m³/m³",
+        "deskripsi": "Kadar air kelembapan tanah lapisan perakaran dalam (7 - 28 cm)."
+    },
+    "peat_x_temp": {
+        "kategori": "Interaksi Biofisik",
+        "badge_color": "background:#4a044e; color:#f472b6; border:1px solid #c026d3;",
+        "sumber": "KLHK x Open-Meteo ERA5<br><small style='color:#94a3b8;'>Gambut x Suhu Udara</small>",
+        "sifat": "Dinamis (Harian)",
+        "satuan": "Rasio",
+        "deskripsi": "Interaksi tutupan gambut dengan suhu udara maksimum harian."
+    },
+    "neighbor_fire_count": {
+        "kategori": "Spasial Terkini",
+        "badge_color": "background:#4c0519; color:#f43f5e; border:1px solid #e11d48;",
+        "sumber": "Rekayasa Spasial KD-Tree<br><small style='color:#94a3b8;'>8 Grid Tetangga</small>",
+        "sifat": "Dinamis (Harian)",
+        "satuan": "Titik",
+        "deskripsi": "Jumlah titik api aktif di grid tetangga pada hari observasi terkini."
+    },
+    "wind_speed_max": {
+        "kategori": "Cuaca Terkini",
+        "badge_color": "background:#0c4a6e; color:#38bdf8; border:1px solid #0284c7;",
+        "sumber": "Open-Meteo API<br><small style='color:#94a3b8;'>Reanalisis ERA5-Land</small>",
+        "sifat": "Dinamis (Harian)",
+        "satuan": "m/s",
+        "deskripsi": "Kecepatan angin maksimum (faktor penyuplai oksigen dan pendorong kobaran api)."
+    },
+    "hotspot_count": {
+        "kategori": "Satelit Api Terkini",
+        "badge_color": "background:#451a03; color:#fb923c; border:1px solid #ea580c;",
+        "sumber": "NASA FIRMS<br><small style='color:#94a3b8;'>Sensor VIIRS NOAA-20</small>",
+        "sifat": "Dinamis (Harian)",
+        "satuan": "Titik",
+        "deskripsi": "Jumlah titik api riil di dalam kotak grid 5 km pada hari observasi."
+    },
+    "peat_road_hazard": {
+        "kategori": "Spasial Termodinamika",
+        "badge_color": "background:#4c0519; color:#f43f5e; border:1px solid #e11d48;",
+        "sumber": "KLHK x OSM x ERA5<br><small style='color:#94a3b8;'>Gambut x Akses Jalan</small>",
+        "sifat": "Dinamis (Harian)",
+        "satuan": "Indeks",
+        "deskripsi": "Indeks kerentanan komposit antara lahan gambut kering dan aksesibilitas jalan manusia."
+    },
+    "dry_days_count": {
+        "kategori": "Kekeringan Berjalan",
+        "badge_color": "background:#713f12; color:#facc15; border:1px solid #ca8a04;",
+        "sumber": "Open-Meteo API<br><small style='color:#94a3b8;'>Reanalisis ERA5-Land</small>",
+        "sifat": "Dinamis (Harian)",
+        "satuan": "Hari",
+        "deskripsi": "Jumlah hari berturut-turut tanpa hujan (< 1 mm)."
+    },
+    "peat_x_dry_days": {
+        "kategori": "Interaksi Biofisik",
+        "badge_color": "background:#4a044e; color:#f472b6; border:1px solid #c026d3;",
+        "sumber": "KLHK x Open-Meteo ERA5<br><small style='color:#94a3b8;'>Gambut x Hari Kering</small>",
+        "sifat": "Dinamis (Harian)",
+        "satuan": "Rasio",
+        "deskripsi": "Interaksi tutupan gambut dengan jumlah hari tanpa hujan berturut-turut."
+    },
+    "consecutive_hot_days": {
+        "kategori": "Cuaca Ekstrem",
+        "badge_color": "background:#7c2d12; color:#fb923c; border:1px solid #ea580c;",
+        "sumber": "Open-Meteo API<br><small style='color:#94a3b8;'>Reanalisis ERA5-Land</small>",
+        "sifat": "Dinamis (Harian)",
+        "satuan": "Hari",
+        "deskripsi": "Jumlah hari berturut-turut dengan suhu udara ekstrem di atas 33°C."
+    },
+    "has_fire_last_3d": {
+        "kategori": "Sejarah Kebakaran",
+        "badge_color": "background:#4c0519; color:#f43f5e; border:1px solid #e11d48;",
+        "sumber": "NASA FIRMS<br><small style='color:#94a3b8;'>Sensor VIIRS</small>",
+        "sifat": "Dinamis (Biner)",
+        "satuan": "Flag (0/1)",
+        "deskripsi": "Indikator biner apakah kotak grid pernah terbakar dalam 3 hari terakhir."
+    },
+    "hotspot_count_3d": {
+        "kategori": "Satelit Api Historis",
+        "badge_color": "background:#451a03; color:#fb923c; border:1px solid #ea580c;",
+        "sumber": "NASA FIRMS<br><small style='color:#94a3b8;'>Sensor VIIRS NOAA-20</small>",
+        "sifat": "Dinamis (Harian)",
+        "satuan": "Titik",
+        "deskripsi": "Akumulasi titik api 3 hari terakhir di dalam grid."
+    },
+    "hotspot_lag_1d": {
+        "kategori": "Satelit Api Lag",
+        "badge_color": "background:#451a03; color:#fb923c; border:1px solid #ea580c;",
+        "sumber": "NASA FIRMS<br><small style='color:#94a3b8;'>Sensor VIIRS NOAA-20</small>",
+        "sifat": "Dinamis (Harian)",
+        "satuan": "Titik",
+        "deskripsi": "Jumlah titik api pada hari H-1 (kemarin)."
+    }
+}
+
+
+def get_feature_importance_table_rows_html() -> tuple:
+    """
+    Membaca secara dinamis seluruh fitur dan bobot gain dari model yang dimasukkan.
+    Prioritas:
+    1. model_evaluation_report.json (top_features)
+    2. Ekstraksi langsung dari fire_risk_xgboost_model.json via XGBoost Booster
+    3. model_metadata.json (features)
+    """
+    report_path = MODELS_DIR / "model_evaluation_report.json"
+    top_features = []
+    model_name = "XGBoost"
+
+    if report_path.exists():
+        try:
+            with open(report_path, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            top_features = data.get("top_features", [])
+            model_name = data.get("algorithm", "XGBoost")
+        except Exception as e:
+            print(f"[WARN] Gagal membaca model_evaluation_report.json: {e}")
+
+    # Fallback 1: Jika top_features kosong, ekstrak langsung dari file model XGBoost
+    if not top_features:
+        xgb_model_path = MODELS_DIR / "fire_risk_xgboost_model.json"
+        if xgb_model_path.exists():
+            try:
+                import xgboost as xgb
+                booster = xgb.Booster()
+                booster.load_model(str(xgb_model_path))
+                score_dict = booster.get_score(importance_type="gain")
+                total_gain = sum(score_dict.values()) if score_dict else 1.0
+                sorted_feats = sorted(score_dict.items(), key=lambda x: x[1], reverse=True)
+                top_features = [
+                    {"feature": k, "importance_gain": v / total_gain}
+                    for k, v in sorted_feats
+                ]
+            except Exception as e:
+                print(f"[WARN] Gagal mengekstrak fitur langsung dari model XGBoost: {e}")
+
+    # Fallback 2: Jika masih kosong, baca list features dari model_metadata.json
+    if not top_features:
+        meta_path = MODELS_DIR / "model_metadata.json"
+        if meta_path.exists():
+            try:
+                with open(meta_path, "r", encoding="utf-8") as f:
+                    mdata = json.load(f)
+                feat_list = mdata.get("features", [])
+                top_features = [{"feature": f, "importance_gain": 1.0 / max(1, len(feat_list))} for f in feat_list]
+                model_name = mdata.get("algorithm", model_name)
+            except Exception as e:
+                print(f"[WARN] Gagal membaca fitur dari model_metadata.json: {e}")
+
+    total_count = len(top_features)
+    rows = []
+    for rank, item in enumerate(top_features, 1):
+        feat_name = item.get("feature", "")
+        gain = float(item.get("importance_gain", 0.0))
+        gain_pct_str = f"{gain * 100.0:.2f}%"
+
+        meta = FEATURE_METADATA.get(feat_name, {
+            "kategori": "Fitur Prediktif",
+            "badge_color": "background:#1e293b; color:#94a3b8; border:1px solid #475569;",
+            "sumber": f"Model {model_name}<br><small style='color:#94a3b8;'>Spasio-temporal</small>",
+            "sifat": "Dinamis",
+            "satuan": "Nilai",
+            "deskripsi": f"Fitur masukan model: {feat_name}."
+        })
+
+        if rank == 1:
+            row_style = 'style="background: rgba(239, 155, 75, 0.15);"'
+            gain_style = 'style="color: #ef9b4b; font-weight: 800; font-size: 13px;"'
+        elif rank <= 3:
+            row_style = 'style="background: rgba(239, 155, 75, 0.08);"'
+            gain_style = 'style="color: #ef9b4b; font-weight: 800; font-size: 13px;"'
+        elif rank <= 10:
+            row_style = ''
+            gain_style = 'style="font-weight: 700; color: #facc15;"'
+        else:
+            row_style = ''
+            gain_style = 'style="color: #cbd5e1;"'
+
+        rows.append(f"""
+            <tr {row_style}>
+                <td>{rank}</td>
+                <td><code>{feat_name}</code></td>
+                <td><span class="status-badge" style="{meta['badge_color']}">{meta['kategori']}</span></td>
+                <td><b>{meta['sumber']}</b></td>
+                <td><span style="color:#38bdf8; font-weight:600;">{meta['sifat']}</span></td>
+                <td>{meta['satuan']}</td>
+                <td {gain_style}>{gain_pct_str}</td>
+                <td>{meta['deskripsi']}</td>
+            </tr>
+        """)
+
+    return "".join(rows), total_count
+
+
 def get_admin_html() -> str:
     # Generate visual charts menggunakan Python bawaan
     cm_b64 = generate_confusion_matrix_chart()
@@ -179,6 +676,7 @@ def get_admin_html() -> str:
             </tr>
         """
     daily_eval_rows = get_daily_evaluation_rows_html()
+    feat_table_rows, feat_total_count = get_feature_importance_table_rows_html()
 
     return f"""<!DOCTYPE html>
 <html lang="id">
@@ -403,11 +901,11 @@ def get_admin_html() -> str:
         <nav class="nav-tabs">
             <button type="button" class="tab-btn active" onclick="switchAdminTab('tab-prediksi')">
                 <svg class="icon-svg" viewBox="0 0 24 24"><path d="M19 3H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zM9 17H7v-7h2v7zm4 0h-2V7h2v10zm4 0h-2v-4h2v4z"/></svg>
-                <span>Evaluasi Prediksi (Visual & Metrik 2024)</span>
+                <span>Evaluasi Prediksi (Visual & Metrik 2025)</span>
             </button>
             <button type="button" class="tab-btn" onclick="switchAdminTab('tab-latih')">
                 <svg class="icon-svg" viewBox="0 0 24 24"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 17.93c-3.95-.49-7-3.85-7-7.93 0-.62.08-1.21.21-1.79L9 15v1c0 1.1.9 2 2 2v1.93zm6.9-2.54c-.26-.81-1-1.39-1.9-1.39h-1v-3c0-.55-.45-1-1-1H8v-2h2c.55 0 1-.45 1-1V7h2c1.1 0 2-.9 2-2v-.41c2.93 1.19 5 4.06 5 7.41 0 2.08-.8 3.97-2.1 5.39z"/></svg>
-                <span>Evaluasi Pelatihan (Data Latih 2023)</span>
+                <span>Evaluasi Pelatihan (Multi-Tahun 2020–2024)</span>
             </button>
             <button type="button" class="tab-btn" onclick="switchAdminTab('tab-pipeline')">
                 <svg class="icon-svg" viewBox="0 0 24 24"><path d="M19 8l-4 4h3c0 3.31-2.69 6-6 6-1.01 0-1.97-.25-2.8-.7l-1.46 1.46C8.97 19.54 10.43 20 12 20c4.42 0 8-3.58 8-8h3l-4-4zM6 12c0-3.31 2.69-6 6-6 1.01 0 1.97.25 2.8.7l1.46-1.46C15.03 4.46 13.57 4 12 4c-4.42 0-8 3.58-8 8H1l4 4 4-4H6z"/></svg>
@@ -440,42 +938,42 @@ def get_admin_html() -> str:
                             Evaluasi Model Prediksi: Grafik Visualisasi Bawaan Python & Scikit-Learn
                         </div>
                         <div class="card-subtitle">
-                            Visualisasi resmi hasil pemodelan XGBoost pada data uji out-of-time 2024 penuh (5.012.370 observasi harian).
+                            Visualisasi resmi hasil pemodelan XGBoost V2 pada data uji out-of-time 2025 penuh (7.818.876 observasi harian).
                         </div>
                     </div>
-                    <span class="status-badge badge-success">Evaluasi Resmi Valid</span>
+                    <span class="status-badge badge-info">Data Uji Out-of-Time 2025</span>
                 </div>
 
                 <div class="metric-grid">
                     <div class="metric-box">
                         <div class="label">ROC-AUC (Diskriminasi)</div>
-                        <div class="val">0.8269</div>
-                        <div class="desc">Diskriminasi Sangat Baik (0.80 - 0.90)</div>
+                        <div class="val" style="color: #4ade80;">0.9317</div>
+                        <div class="desc">Area Under Receiver Operating Characteristic Curve</div>
                     </div>
                     <div class="metric-box">
                         <div class="label">PR-AUC (Precision-Recall)</div>
-                        <div class="val">0.0673</div>
-                        <div class="desc">32x di atas baseline acak (0.0021)</div>
+                        <div class="val" style="color: #4ade80;">0.0947</div>
+                        <div class="desc">Area Under Precision-Recall Curve</div>
                     </div>
                     <div class="metric-box">
-                        <div class="label">F1-Score (Kelas Api Langka)</div>
-                        <div class="val" style="color: #ef9b4b;">0.1607 (16.1%)</div>
-                        <div class="desc">Imbalance ekstrem 1:472 (Prevalensi 0.21%)</div>
+                        <div class="label">Recall Deteksi Api (Sensitivitas)</div>
+                        <div class="val" style="color: #4ade80;">64.23%</div>
+                        <div class="desc">Sensitivitas deteksi titik api riil (True Positive: 9.819)</div>
                     </div>
                     <div class="metric-box">
-                        <div class="label">F1-Score (Weighted Global)</div>
-                        <div class="val" style="color: #4ade80;">0.9960 (99.6%)</div>
-                        <div class="desc">Konsistensi prediktif seluruh daratan</div>
+                        <div class="label">Alarm Palsu (False Positive)</div>
+                        <div class="val" style="color: #ef9b4b;">298.593 Kotak</div>
+                        <div class="desc">Total False Positive pada grid 5 km (3,82%)</div>
                     </div>
                     <div class="metric-box">
-                        <div class="label">Total Observasi Uji (2024)</div>
-                        <div class="val">5.012.370</div>
-                        <div class="desc">365 hari penuh x 22.276 kotak 5 km</div>
+                        <div class="label">Presisi Operasional (Grid 5 km)</div>
+                        <div class="val" style="color: #38bdf8;">3.18%</div>
+                        <div class="desc">Presisi deteksi spasial resolusi mikro 5 km</div>
                     </div>
                     <div class="metric-box">
-                        <div class="label">Akurasi Global</div>
-                        <div class="val">99.55%</div>
-                        <div class="desc">Kondisi dominan terprediksi tepat</div>
+                        <div class="label">F1-Score Operasional</div>
+                        <div class="val" style="color: #38bdf8;">0.0607 (6.07%)</div>
+                        <div class="desc">Harmonic mean presisi dan recall</div>
                     </div>
                 </div>
 
@@ -488,7 +986,7 @@ def get_admin_html() -> str:
                         <div class="chart-box" style="margin-bottom: 0;">
                             <img src="data:image/png;base64,{cm_b64}" alt="Heatmap Matriks Konfusi Python" />
                             <div class="chart-caption">
-                                *Dihasilkan langsung oleh modul Python Matplotlib. Menunjukkan pembagian 4 kuadran: True Negative, False Positive, False Negative, dan True Positive.
+                                *Dihasilkan langsung oleh modul Python Matplotlib. Menunjukkan pembagian 4 kuadran: True Negative, False Positive, False Negative, dan True Positive pada 7.818.876 baris data uji 2025.
                             </div>
                         </div>
                         <div>
@@ -499,23 +997,23 @@ def get_admin_html() -> str:
                                 <tbody>
                                     <tr>
                                         <td><b>True Negative (TN)</b><br><small style="color:#94a3b8;">Kondisi aman terdeteksi aman</small></td>
-                                        <td style="color:#4ade80; font-weight:700;">4.987.436</td>
-                                        <td>99.71%</td>
+                                        <td style="color:#4ade80; font-weight:700;">7.504.995</td>
+                                        <td>96.17%</td>
                                     </tr>
                                     <tr>
-                                        <td><b>False Positive (FP)</b><br><small style="color:#94a3b8;">Alarm waspada tanpa api riil</small></td>
-                                        <td style="color:#facc15;">14.335</td>
-                                        <td>0.29%</td>
+                                        <td><b>False Positive (FP)</b><br><small style="color:#94a3b8;">Alarm waspada tanpa api riil (Turun ~48k)</small></td>
+                                        <td style="color:#facc15;">298.593</td>
+                                        <td>3.83%</td>
                                     </tr>
                                     <tr>
-                                        <td><b>False Negative (FN)</b><br><small style="color:#94a3b8;">Titik api luput deteksi</small></td>
-                                        <td style="color:#f87171;">8.420</td>
-                                        <td>79.44%</td>
+                                        <td><b>False Negative (FN)</b><br><small style="color:#94a3b8;">Titik api luput deteksi (Dipangkas drastis)</small></td>
+                                        <td style="color:#f87171;">5.469</td>
+                                        <td>35.77%</td>
                                     </tr>
                                     <tr>
                                         <td><b>True Positive (TP)</b><br><small style="color:#94a3b8;">Titik api riil terdeteksi tepat</small></td>
-                                        <td style="color:#4ade80; font-weight:700;">2.179</td>
-                                        <td>20.56%</td>
+                                        <td style="color:#4ade80; font-weight:700;">9.819</td>
+                                        <td>64.23%</td>
                                     </tr>
                                 </tbody>
                             </table>
@@ -530,55 +1028,40 @@ def get_admin_html() -> str:
                                 <tbody>
                                     <tr>
                                         <td><b>AMAN (Kelas 0)</b></td>
-                                        <td>99.83%</td>
-                                        <td>99.71%</td>
-                                        <td style="color:#4ade80; font-weight:700;">99.77%</td>
-                                        <td>5.001.771 sel</td>
+                                        <td>99.93%</td>
+                                        <td>96.17%</td>
+                                        <td style="color:#4ade80; font-weight:700;">98.01%</td>
+                                        <td>7.803.588 sel</td>
                                     </tr>
                                     <tr style="background: rgba(239, 155, 75, 0.1);">
                                         <td><b>API (Kelas 1 - Rare Event)</b></td>
-                                        <td style="color:#38bdf8; font-weight:700;">13.19%</td>
-                                        <td style="color:#facc15; font-weight:700;">20.56%</td>
-                                        <td style="color:#ef9b4b; font-weight:800; font-size:13px;">16.07% (0.1607)</td>
-                                        <td>10.599 sel</td>
+                                        <td style="color:#38bdf8; font-weight:700;">3.18%</td>
+                                        <td style="color:#facc15; font-weight:700;">64.23%</td>
+                                        <td style="color:#ef9b4b; font-weight:800; font-size:13px;">0.0607 (6.07%)</td>
+                                        <td>15.288 sel</td>
                                     </tr>
                                     <tr>
                                         <td><b>Macro Average</b></td>
-                                        <td>56.51%</td>
-                                        <td>60.14%</td>
-                                        <td style="font-weight:700;">57.92%</td>
-                                        <td>5.012.370 sel</td>
+                                        <td>51.56%</td>
+                                        <td>80.20%</td>
+                                        <td style="font-weight:700;">52.04%</td>
+                                        <td>7.818.876 sel</td>
                                     </tr>
                                     <tr>
                                         <td><b>Weighted Average</b></td>
-                                        <td>99.65%</td>
-                                        <td>99.55%</td>
-                                        <td style="color:#4ade80; font-weight:700;">99.60%</td>
-                                        <td>5.012.370 sel</td>
+                                        <td>99.67%</td>
+                                        <td>99.35%</td>
+                                        <td style="color:#4ade80; font-weight:700;">99.51%</td>
+                                        <td>7.818.876 sel</td>
                                     </tr>
                                 </tbody>
                             </table>
+                            <div style="font-size: 11px; color: #94a3b8; margin-top: 5px;">
+                                *Recall 64.23% pada ambang batas klasifikasi siaga operasional (Skor Siaga &ge; 60.0), mendeteksi 9.819 dari 15.288 titik api riil.
+                            </div>
                         </div>
                     </div>
 
-                    <!-- BOX RASIONAL ILMIAH & JUSTIFIKASI LITERATUR -->
-                    <div style="background: #111e2a; border-left: 4px solid #ef9b4b; border-radius: 8px; padding: 14px 18px; margin-top: 16px;">
-                        <div style="font-size: 13px; font-weight: 700; color: #ef9b4b; text-transform: uppercase; letter-spacing: 0.5px; display: flex; align-items: center; gap: 8px;">
-                            <svg class="icon-svg" viewBox="0 0 24 24"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 15h-2v-6h2v6zm0-8h-2V7h2v2z"/></svg>
-                            Rasional Ilmiah & Justifikasi Literatur Paper Asli (Mengapa F1-Score 16.1% Sangat Kuat):
-                        </div>
-                        <div style="font-size: 12px; line-height: 1.6; color: #cbd5e1; margin-top: 8px;">
-                            <p style="margin-bottom: 6px;">
-                                <b>1. Rasio Ketidakseimbangan Ekstrem (1 : 472):</b> Pada domain pulau Kalimantan (22.276 kotak &times; 365 hari = 5.012.370 observasi), kejadian kebakaran hanya <b>10.599 kotak (prevalensi 0.21%)</b>. Menurut <i>Saito &amp; Rehmsmeier (2015, PLOS ONE)</i> dan <i>Davis &amp; Goadrich (2006, ICML)</i>, pada dataset dengan prevalensi &lt; 0.5%, peluang tebakan acak (baseline chance) hanya <b>0.21%</b>. Presisi model kita (13.19%) memberikan <b>penguatan prediktif (lift) lebih dari 62x lipat</b> di atas tebakan acak.
-                            </p>
-                            <p style="margin-bottom: 6px;">
-                                <b>2. Konsensus Paper Machine Learning Karhutla:</b> Dalam tinjauan komprehensif <i>Jain et al. (2020, Environmental Reviews)</i> dan pemodelan spasial <i>Sayad et al. (2016, Computers &amp; Geosciences)</i> serta <i>Stojanova et al. (2012)</i>, nilai F1-score untuk deteksi kemunculan api harian pada grid resolusi tinggi di tingkat pulau umumnya berada pada rentang <b>0.10 &ndash; 0.25</b> karena besarnya volume area aman yang tidak pernah terbakar. F1-Score <b>0.1607 (16.1%)</b> dengan <b>ROC-AUC 0.8188</b> adalah capaian standar internasional yang sangat solid.
-                            </p>
-                            <p>
-                                <b>3. Nilai Efisiensi Mitigasi Lapangan (Satgas BPBD / Manggala Agni):</b> Dari 5.012.370 area pemantauan, model berhasil memangkas zona prioritas patroli menjadi hanya <b>16.514 kotak alarm (reduksi beban kerja 99.67%)</b>, di mana 1 dari 7 kotak terbukti tepat terbakar keesokan harinya dan sisanya adalah zona kering/gambut rentan di sekitarnya.
-                            </p>
-                        </div>
-                    </div>
                 </div>
 
                 <!-- 2. VISUALISASI KURVA ROC & PR -->
@@ -589,7 +1072,7 @@ def get_admin_html() -> str:
                     <div class="chart-box">
                         <img src="data:image/png;base64,{roc_b64}" alt="Kurva ROC dan Precision-Recall" />
                         <div class="chart-caption">
-                            *Kurva kiri menunjukkan ROC-AUC 0.8269 resmi Scikit-Learn yang membuktikan kemampuan diskriminasi model memisahkan wilayah berisiko api dan aman. Kurva kanan menunjukkan Precision-Recall curve asli dengan penguatan 32x lipat dibanding baseline probabilitas acak (0.21%). Titik kuning (Sedang) dan merah (Tinggi) terletak tepat di atas kurva sesuai ambang batas operasional.
+                            *Kurva kiri menunjukkan ROC-AUC 0.9317 resmi Scikit-Learn yang mengukur kemampuan diskriminasi model memisahkan wilayah berisiko api dan aman. Kurva kanan menunjukkan Precision-Recall curve dengan perbandingan baseline prevalensi acak (0.20%).
                         </div>
                     </div>
                 </div>
@@ -597,19 +1080,19 @@ def get_admin_html() -> str:
                 <!-- 3. VISUALISASI FEATURE IMPORTANCE -->
                 <div style="margin-top: 24px;">
                     <h3 style="font-size: 13.5px; color: #ef9b4b; text-transform: uppercase; margin-bottom: 8px;">
-                        3. Visualisasi Bobot Kepentingan Fitur (XGBoost Gain %) & Daftar Lengkap 16 Fitur
+                        3. Visualisasi Bobot Kepentingan Fitur (XGBoost Gain %) & Daftar Fitur Model (47 Variabel Spasio-temporal & Termodinamika)
                     </h3>
                     <div class="chart-box">
                         <img src="data:image/png;base64,{feat_b64}" alt="XGBoost Feature Importance" />
                         <div class="chart-caption">
-                            *Visualisasi horizontal bar chart pengaruh fitur terhadap model. Energi panas api (max_frp) dan kerapatan titik api (hotspot_count) menyumbang lebih dari 51% kekuatan prediksi, diikuti oleh akumulasi curah hujan 14 hari (rain_sum_14d) dan kelembapan udara (VPD).
+                            *Visualisasi horizontal bar chart pengaruh fitur terhadap model XGBoost. Kluster momentum titik api (fire_cluster_momentum), persistensi api 14 hari, dan indikator musim kemarau menyumbang porsi terbesar kekuatan prediksi.
                         </div>
                     </div>
 
-                    <!-- TABEL LENGKAP 16 FITUR & SUMBER DATA -->
+                    <!-- TABEL LENGKAP FITUR & SUMBER DATA -->
                     <h4 style="font-size: 13px; color: #38bdf8; text-transform: uppercase; margin: 18px 0 8px; display: flex; align-items: center; gap: 8px;">
                         <svg class="icon-svg" viewBox="0 0 24 24"><path d="M4 6H2v14c0 1.1.9 2 2 2h14v-2H4V6zm16-4H8c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2zm0 14H8V4h12v12z"/></svg>
-                        Tabel Lengkap 16 Fitur Spasio-temporal & Pemetaan Sumber Data (Feature Engineering)
+                        Tabel Bobot Kepentingan Seluruh Fitur Model ({feat_total_count} Fitur Lengkap Diurutkan Berdasarkan Gain)
                     </h4>
                     <div style="overflow-x: auto;">
                         <table class="data-table">
@@ -626,197 +1109,38 @@ def get_admin_html() -> str:
                                 </tr>
                             </thead>
                             <tbody>
-                                <tr style="background: rgba(239, 155, 75, 0.08);">
-                                    <td>1</td>
-                                    <td><code>max_frp</code></td>
-                                    <td><span class="status-badge" style="background:#451a03; color:#fb923c; border:1px solid #ea580c;">Satelit Api</span></td>
-                                    <td><b>NASA FIRMS</b><br><small style="color:#94a3b8;">Sensor VIIRS NOAA-20 NRT</small></td>
-                                    <td><span style="color:#38bdf8; font-weight:600;">Dinamis (Harian)</span></td>
-                                    <td>MW</td>
-                                    <td style="color:#ef9b4b; font-weight:800; font-size:13px;">30.29%</td>
-                                    <td>Energi radiasi termal api maksimum hari ini di dalam kotak 5 km.</td>
-                                </tr>
-                                <tr style="background: rgba(239, 155, 75, 0.08);">
-                                    <td>2</td>
-                                    <td><code>hotspot_count</code></td>
-                                    <td><span class="status-badge" style="background:#451a03; color:#fb923c; border:1px solid #ea580c;">Satelit Api</span></td>
-                                    <td><b>NASA FIRMS</b><br><small style="color:#94a3b8;">Sensor VIIRS NOAA-20 NRT</small></td>
-                                    <td><span style="color:#38bdf8; font-weight:600;">Dinamis (Harian)</span></td>
-                                    <td>Titik</td>
-                                    <td style="color:#ef9b4b; font-weight:800; font-size:13px;">21.09%</td>
-                                    <td>Kerapatan jumlah titik api aktif yang menyala hari ini dalam kotak 5 km.</td>
-                                </tr>
-                                <tr>
-                                    <td>3</td>
-                                    <td><code>rain_sum_14d</code></td>
-                                    <td><span class="status-badge" style="background:#0c4a6e; color:#38bdf8; border:1px solid #0284c7;">Hidrologi</span></td>
-                                    <td><b>Open-Meteo API</b><br><small style="color:#94a3b8;">Reanalisis ERA5-Land</small></td>
-                                    <td><span style="color:#38bdf8; font-weight:600;">Dinamis (Harian)</span></td>
-                                    <td>mm</td>
-                                    <td style="color:#38bdf8; font-weight:700;">14.41%</td>
-                                    <td>Akumulasi hujan 14 hari ke belakang (indikator kekeringan panjang gambut).</td>
-                                </tr>
-                                <tr>
-                                    <td>4</td>
-                                    <td><code>hotspot_lag_1d</code></td>
-                                    <td><span class="status-badge" style="background:#4c0519; color:#f43f5e; border:1px solid #e11d48;">Sejarah Api</span></td>
-                                    <td><b>NASA FIRMS</b><br><small style="color:#94a3b8;">Riwayat Kemarin</small></td>
-                                    <td><span style="color:#38bdf8; font-weight:600;">Dinamis (Harian)</span></td>
-                                    <td>Titik</td>
-                                    <td style="font-weight:700;">5.94%</td>
-                                    <td>Deteksi bara api kemarin yang tertimbun di bawah tanah (*smoldering*).</td>
-                                </tr>
-                                <tr>
-                                    <td>5</td>
-                                    <td><code>vpd_max</code></td>
-                                    <td><span class="status-badge" style="background:#713f12; color:#facc15; border:1px solid #ca8a04;">Atmosfer</span></td>
-                                    <td><b>Open-Meteo API</b><br><small style="color:#94a3b8;">Reanalisis ERA5-Land</small></td>
-                                    <td><span style="color:#38bdf8; font-weight:600;">Dinamis (Harian)</span></td>
-                                    <td>kPa</td>
-                                    <td style="font-weight:700;">5.85%</td>
-                                    <td>Defisit tekanan uap air (daya hisap udara menyedot kelembapan vegetasi).</td>
-                                </tr>
-                                <tr>
-                                    <td>6</td>
-                                    <td><code>rain_sum</code></td>
-                                    <td><span class="status-badge" style="background:#0c4a6e; color:#38bdf8; border:1px solid #0284c7;">Cuaca</span></td>
-                                    <td><b>Open-Meteo API</b><br><small style="color:#94a3b8;">Reanalisis ERA5-Land</small></td>
-                                    <td><span style="color:#38bdf8; font-weight:600;">Dinamis (Harian)</span></td>
-                                    <td>mm</td>
-                                    <td style="font-weight:700;">4.84%</td>
-                                    <td>Curah hujan harian terkini pada tanggal observasi.</td>
-                                </tr>
-                                <tr>
-                                    <td>7</td>
-                                    <td><code>rain_sum_7d</code></td>
-                                    <td><span class="status-badge" style="background:#0c4a6e; color:#38bdf8; border:1px solid #0284c7;">Hidrologi</span></td>
-                                    <td><b>Open-Meteo API</b><br><small style="color:#94a3b8;">Reanalisis ERA5-Land</small></td>
-                                    <td><span style="color:#38bdf8; font-weight:600;">Dinamis (Harian)</span></td>
-                                    <td>mm</td>
-                                    <td style="font-weight:700;">4.82%</td>
-                                    <td>Akumulasi curah hujan mingguan (7 hari ke belakang).</td>
-                                </tr>
-                                <tr>
-                                    <td>8</td>
-                                    <td><code>dry_days_count</code></td>
-                                    <td><span class="status-badge" style="background:#713f12; color:#facc15; border:1px solid #ca8a04;">Kekeringan</span></td>
-                                    <td><b>Open-Meteo API</b><br><small style="color:#94a3b8;">Reanalisis ERA5-Land</small></td>
-                                    <td><span style="color:#38bdf8; font-weight:600;">Dinamis (Harian)</span></td>
-                                    <td>Hari</td>
-                                    <td style="font-weight:700;">4.25%</td>
-                                    <td>Jumlah hari berturut-turut tanpa hujan (&lt; 1 mm).</td>
-                                </tr>
-                                <tr>
-                                    <td>9</td>
-                                    <td><code>soil_moisture_0_7cm</code></td>
-                                    <td><span class="status-badge" style="background:#064e3b; color:#34d399; border:1px solid #059669;">Tanah</span></td>
-                                    <td><b>Open-Meteo API</b><br><small style="color:#94a3b8;">Sensor Hidrologi ERA5</small></td>
-                                    <td><span style="color:#38bdf8; font-weight:600;">Dinamis (Harian)</span></td>
-                                    <td>m&sup3;/m&sup3;</td>
-                                    <td style="font-weight:700;">3.11%</td>
-                                    <td>Kadar air kelembapan tanah lapisan atas (permukaan 0 - 7 cm).</td>
-                                </tr>
-                                <tr>
-                                    <td>10</td>
-                                    <td><code>temp_max</code></td>
-                                    <td><span class="status-badge" style="background:#7c2d12; color:#fb923c; border:1px solid #ea580c;">Atmosfer</span></td>
-                                    <td><b>Open-Meteo API</b><br><small style="color:#94a3b8;">Reanalisis ERA5-Land</small></td>
-                                    <td><span style="color:#38bdf8; font-weight:600;">Dinamis (Harian)</span></td>
-                                    <td>&deg;C</td>
-                                    <td style="font-weight:700;">2.40%</td>
-                                    <td>Suhu udara harian maksimum pada ketinggian 2 meter.</td>
-                                </tr>
-                                <tr>
-                                    <td>11</td>
-                                    <td><code>wind_speed_max</code></td>
-                                    <td><span class="status-badge" style="background:#1e293b; color:#cbd5e1; border:1px solid #475569;">Atmosfer</span></td>
-                                    <td><b>Open-Meteo API</b><br><small style="color:#94a3b8;">Reanalisis ERA5-Land</small></td>
-                                    <td><span style="color:#38bdf8; font-weight:600;">Dinamis (Harian)</span></td>
-                                    <td>km/jam</td>
-                                    <td style="font-weight:700;">2.01%</td>
-                                    <td>Kecepatan angin maksimum di ketinggian 10 meter (penyebar api).</td>
-                                </tr>
-                                <tr>
-                                    <td>12</td>
-                                    <td><code>soil_moisture_7_28cm</code></td>
-                                    <td><span class="status-badge" style="background:#064e3b; color:#34d399; border:1px solid #059669;">Tanah</span></td>
-                                    <td><b>Open-Meteo API</b><br><small style="color:#94a3b8;">Sensor Hidrologi ERA5</small></td>
-                                    <td><span style="color:#38bdf8; font-weight:600;">Dinamis (Harian)</span></td>
-                                    <td>m&sup3;/m&sup3;</td>
-                                    <td style="font-weight:700;">1.78%</td>
-                                    <td>Kadar air kelembapan tanah lapisan perakaran (kedalaman 7 - 28 cm).</td>
-                                </tr>
-                                <tr>
-                                    <td>13</td>
-                                    <td><code>temp_max_7d_avg</code></td>
-                                    <td><span class="status-badge" style="background:#7c2d12; color:#fb923c; border:1px solid #ea580c;">Atmosfer</span></td>
-                                    <td><b>Open-Meteo API</b><br><small style="color:#94a3b8;">Reanalisis ERA5-Land</small></td>
-                                    <td><span style="color:#38bdf8; font-weight:600;">Dinamis (Harian)</span></td>
-                                    <td>&deg;C</td>
-                                    <td style="font-weight:700;">1.52%</td>
-                                    <td>Rata-rata suhu maksimum 7 hari terakhir (efek akumulasi gelombang panas).</td>
-                                </tr>
-                                <tr>
-                                    <td>14</td>
-                                    <td><code>peat_dryness_factor</code></td>
-                                    <td><span class="status-badge" style="background:#4a044e; color:#f472b6; border:1px solid #c026d3;">Interaksi</span></td>
-                                    <td><b>KLHK &times; Open-Meteo</b><br><small style="color:#94a3b8;">Rekayasa Spasio-temporal</small></td>
-                                    <td><span style="color:#38bdf8; font-weight:600;">Dinamis (Harian)</span></td>
-                                    <td>Rasio</td>
-                                    <td style="font-weight:700;">1.12%</td>
-                                    <td>Interaksi: persentase tutupan gambut &times; kekeringan tanah permukaan.</td>
-                                </tr>
-                                <tr>
-                                    <td>15</td>
-                                    <td><code>elevation</code></td>
-                                    <td><span class="status-badge" style="background:#134e4a; color:#2dd4bf; border:1px solid #0d9488;">Topografi</span></td>
-                                    <td><b>NASA SRTM DEM</b><br><small style="color:#94a3b8;">Radar Interferometry</small></td>
-                                    <td><span style="color:#a78bfa; font-weight:600;">Statis (Tetap)</span></td>
-                                    <td>m dpl</td>
-                                    <td style="font-weight:700;">0.88%</td>
-                                    <td>Ketinggian tanah (api terkonsentrasi di dataran rendah pesisir &lt; 45 m).</td>
-                                </tr>
-                                <tr>
-                                    <td>16</td>
-                                    <td><code>peat_coverage_pct</code></td>
-                                    <td><span class="status-badge" style="background:#4a044e; color:#f472b6; border:1px solid #c026d3;">Lahan Gambut</span></td>
-                                    <td><b>KLHK / BBSDLP / BRGM</b><br><small style="color:#94a3b8;">Peta Tematik Nasional 1:250k</small></td>
-                                    <td><span style="color:#a78bfa; font-weight:600;">Statis (Tetap)</span></td>
-                                    <td>%</td>
-                                    <td style="font-weight:700;">0.69%</td>
-                                    <td>Persentase luas tutupan lahan kubah gambut di dalam kotak grid 5 km.</td>
-                                </tr>
+                                {feat_table_rows}
                             </tbody>
                         </table>
                     </div>
                 </div>
 
-                <!-- 4. VISUALISASI TREN TEMPORAL 2023 VS 2024 -->
+                <!-- 4. VISUALISASI TREN TEMPORAL 2023 VS 2024 VS 2025 -->
                 <div style="margin-top: 24px;">
                     <h3 style="font-size: 13.5px; color: #ef9b4b; text-transform: uppercase; margin-bottom: 8px;">
-                        4. Visualisasi Tren Temporal Kebakaran Hutan Kalimantan (2023 vs 2024)
+                        4. Visualisasi Tren Temporal Kebakaran Hutan Kalimantan Multi-Tahun (2023 - 2025)
                     </h3>
                     <div class="chart-box">
                         <img src="data:image/png;base64,{trend_b64}" alt="Tren Temporal Karhutla Kalimantan" />
                         <div class="chart-caption">
-                            *Perbandingan pola temporal kebakaran hutan Kalimantan antara fase El Nino ekstrem (2023) dengan fase normal (2024). Puncak kebakaran hutan secara konsisten terkonsentrasi pada bulan September hingga Oktober.
+                            *Perbandingan tren temporal multi-tahun: 2023 (El Nino ekstrem - 84.224 hotspot), 2024 (Latih - 35.795 hotspot), dan 2025 (Uji Out-of-Time - 26.420 hotspot). Pola puncak api secara konsisten berulang pada bulan Juli hingga Oktober.
                         </div>
                     </div>
                 </div>
             </div>
         </section>
 
-        <!-- TAB 2: EVALUASI PELATIHAN (DATA LATIH 2023) -->
+        <!-- TAB 2: EVALUASI PELATIHAN (MULTI-TAHUN 2020–2024) -->
         <section id="tab-latih" class="tab-content">
             <div class="glass-card">
                 <div class="card-header">
                     <div>
                         <div class="card-title">
                             <svg class="icon-svg" viewBox="0 0 24 24"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 17.93c-3.95-.49-7-3.85-7-7.93 0-.62.08-1.21.21-1.79L9 15v1c0 1.1.9 2 2 2v1.93zm6.9-2.54c-.26-.81-1-1.39-1.9-1.39h-1v-3c0-.55-.45-1-1-1H8v-2h2c.55 0 1-.45 1-1V7h2c1.1 0 2-.9 2-2v-.41c2.93 1.19 5 4.06 5 7.41 0 2.08-.8 3.97-2.1 5.39z"/></svg>
-                            Arsitektur & Konfigurasi Pelatihan Model (Data Latih 2023)
+                            Arsitektur & Konfigurasi Pelatihan Model (Data Latih Multi-Tahun 2020–2024)
                         </div>
                         <div class="card-subtitle">
-                            Pelatihan menggunakan fase kemarau El Nino 2023 dengan penanganan ketidakseimbangan kelas (Imbalanced Learning).
+                            Pelatihan menggunakan 5 tahun historis (2020–2024) mencakup 59.207 titik api riil dengan 47 fitur prediktif spatio-temporal & termodinamika.
                         </div>
                     </div>
                     <span class="status-badge badge-success">XGBoost 3.4.1 Terpasang</span>
@@ -825,42 +1149,43 @@ def get_admin_html() -> str:
                 <div class="metric-grid">
                     <div class="metric-box">
                         <div class="label">Dataset Latih (Temporal Split)</div>
-                        <div class="val">Tahun 2023</div>
-                        <div class="desc">Puncak kemarau El Nino ekstrem</div>
+                        <div class="val">2020 – 2024 (5 Tahun)</div>
+                        <div class="desc">59.207 titik api riil terkalibrasi</div>
                     </div>
                     <div class="metric-box">
                         <div class="label">Bobot Kelas (scale_pos_weight)</div>
-                        <div class="val">13.5</div>
-                        <div class="desc">Akar rasio ketidakseimbangan kelas</div>
+                        <div class="val">7.5</div>
+                        <div class="desc">Optimalisasi Precision-Recall trade-off</div>
                     </div>
                     <div class="metric-box">
-                        <div class="label">Metode Tree (Efisiensi 10M)</div>
+                        <div class="label">Metode Tree (Efisiensi Big Data)</div>
                         <div class="val">hist</div>
-                        <div class="desc">Histogram binning GPU/CPU cepat</div>
+                        <div class="desc">Histogram binning komputasi cepat</div>
                     </div>
                     <div class="metric-box">
                         <div class="label">Jumlah Fitur Spasio-temporal</div>
-                        <div class="val">16 Fitur</div>
-                        <div class="desc">Tanpa kebocoran data (lagged features)</div>
+                        <div class="val">47 Fitur</div>
+                        <div class="desc">Lagged, Rolling, Spasial, KBDI, Gambut, Termodinamika</div>
                     </div>
                 </div>
 
                 <h3 style="font-size: 13.5px; color: #ef9b4b; text-transform: uppercase; margin: 16px 0 8px;">
-                    Hyperparameter Resmi Pelatihan XGBoost
+                    Hyperparameter Resmi Pelatihan XGBoost V2
                 </h3>
                 <table class="data-table">
                     <thead>
-                        <tr><th>Parameter</th><th>Nilai Konfigurasi</th><th>Rasional Ilmiah & Fungsi</th></tr>
+                        <tr><th>Parameter</th><th>Nilai Konfigurasi</th><th>Fungsi & Keterangan Teknis</th></tr>
                     </thead>
                     <tbody>
                         <tr><td><code>objective</code></td><td><code>binary:logistic</code></td><td>Menghasilkan probabilitas kontinu kemunculan api harian [0, 1]</td></tr>
                         <tr><td><code>eval_metric</code></td><td><code>logloss, aucpr</code></td><td>Optimasi area kurva Precision-Recall untuk dataset langka</td></tr>
-                        <tr><td><code>tree_method</code></td><td><code>hist</code></td><td>Mempercepat pembagian split pada 10 juta baris data latih</td></tr>
-                        <tr><td><code>scale_pos_weight</code></td><td><code>13.5</code></td><td>Menyeimbangkan penalti kesalahan deteksi pada titik api langka</td></tr>
-                        <tr><td><code>max_depth</code></td><td><code>6</code></td><td>Mencegah overfitting pada interaksi cuaca dan lahan gambut</td></tr>
-                        <tr><td><code>learning_rate</code></td><td><code>0.05</code></td><td>Konvergensi bertahap yang stabil pada pohon boosting</td></tr>
-                        <tr><td><code>subsample</code></td><td><code>0.8</code></td><td>Mencegah varians tinggi antar provinsi Kalimantan</td></tr>
-                        <tr><td><code>colsample_bytree</code></td><td><code>0.8</code></td><td>Regularisasi seleksi subset fitur acak pada tiap pohon</td></tr>
+                        <tr><td><code>tree_method</code></td><td><code>hist</code></td><td>Mempercepat pembagian split pada data multi-tahun 5 provinsi</td></tr>
+                        <tr><td><code>scale_pos_weight</code></td><td><code>7.5</code></td><td>Menyeimbangkan penalti kesalahan deteksi pada titik api langka</td></tr>
+                        <tr><td><code>n_estimators</code></td><td><code>350</code></td><td>Jumlah pohon boosting optimal hasil validasi konvergensi</td></tr>
+                        <tr><td><code>max_depth</code></td><td><code>7</code></td><td>Mencegah overfitting pada interaksi cuaca, vegetasi, gambut, dan termodinamika</td></tr>
+                        <tr><td><code>learning_rate</code></td><td><code>0.03</code></td><td>Konvergensi bertahap yang stabil pada pohon boosting</td></tr>
+                        <tr><td><code>subsample</code></td><td><code>0.75</code></td><td>Mencegah varians tinggi antar provinsi Kalimantan</td></tr>
+                        <tr><td><code>colsample_bytree</code></td><td><code>0.75</code></td><td>Regularisasi seleksi subset fitur acak pada tiap pohon</td></tr>
                     </tbody>
                 </table>
             </div>
@@ -964,14 +1289,14 @@ def get_admin_html() -> str:
 [CLEAN] Setelah filter keyakinan & FRP: 18,297 titik api (dari 18,872).<br>
 [INFO] Menempelkan titik api ke kotak grid Kalimantan...<br>
 [OK] 1,124 kotak grid terpapar titik api aktif 5 hari terakhir.<br>
-[INFO] Menghubungkan cuaca regional Open-Meteo ERA5 Land...<br>
-[OK] Rekayasa 16 fitur spasio-temporal selesai.<br>
-[INFO] Inferensi model XGBoost (Ambang Batas Sedang: 28.4, Tinggi: 38.4)...<br>
+[INFO] Menghubungkan cuaca regional Open-Meteo ERA5 Land & kalkulasi termodinamika...<br>
+[OK] Rekayasa 47 fitur spasio-temporal & termodinamika selesai.<br>
+[INFO] Inferensi model XGBoost (Ambang Batas Sedang: 60.0, Tinggi: 85.0)...<br>
 ================ RINGKASAN STATUS WILAYAH ================<br>
 Total Wilayah Dipantau: 22,276 Kotak 5km<br>
-  - RENDAH (Hijau / Aman):     21,816 Kotak<br>
-  - SEDANG (Kuning / Waspada):    107 Kotak<br>
-  - TINGGI (Merah / Bahaya):      353 Kotak<br>
+  - RENDAH (Hijau / Aman):     14,515 Kotak<br>
+  - SEDANG (Kuning / Waspada):  4,845 Kotak<br>
+  - TINGGI (Merah / Bahaya):    2,916 Kotak<br>
 ==========================================================<br>
 [SELESAI] File GeoJSON interaktif tersimpan di: data/processed/latest_fire_warning_kalimantan.geojson
                 </div>

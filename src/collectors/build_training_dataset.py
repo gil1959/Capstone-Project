@@ -1,11 +1,11 @@
 """
-Script Pengunduh & Pembangun Dataset Latih Historis (Training Dataset) 2023 - 2024.
+Script Pengunduh & Pembangun Dataset Latih Historis (Training Dataset) 2020 - 2025.
 Sistem: "Forest Fire Risk Prediction and Early Warning System for Kalimantan Using Satellite Data and Machine Learning"
 
 Alur Kerja:
-1. Mengunduh data titik api NASA FIRMS historis (arsip VIIRS NOAA-20 SP) rentang 2023 - 2024.
+1. Mengunduh data titik api NASA FIRMS historis (arsip VIIRS NOAA-20 SP) rentang 2020 - 2025.
 2. Memfilter keyakinan (confidence) & FRP, lalu menempelkan ke Master Grid 5 km Kalimantan (spatial join).
-3. Mengunduh data cuaca & kadar air tanah Open-Meteo Archive API rentang 2023 - 2024 dengan auto-checkpointing.
+3. Mengunduh data cuaca & kadar air tanah Open-Meteo Archive API rentang 2020 - 2025 dengan auto-checkpointing.
 4. Menggabungkan data cuaca + riwayat api + data statis gambut & elevasi.
 5. Rekayasa fitur (rolling rain 7d/14d, dry days count, peat dryness factor) & pembentukan target biner H+1.
 6. Menyimpan dataset latih ke file Parquet siap pakai.
@@ -25,17 +25,17 @@ from src.collectors.weather_downloader import WeatherDownloader
 from src.processing.feature_engineer import build_features
 
 def build_learning_dataset(
-    start_date: str = "2023-01-01",
-    end_date: str = "2024-12-31",
+    start_date: str = "2020-01-01",
+    end_date: str = "2025-12-31",
     sample_grids: int = None,
     skip_firms_download: bool = False,
     skip_weather_download: bool = False
 ) -> pd.DataFrame:
     """
-    Mengunduh data learning 2023-2024 dan menyusun dataset latih biner H+1.
+    Mengunduh data learning 2020-2025 dan menyusun dataset latih biner H+1.
     """
     print("\n" + "=" * 75)
-    print("   PENGUNDUH & PEMBANGUN DATASET LATIH (LEARNING DATA) 2023 - 2024")
+    print("   PENGUNDUH & PEMBANGUN DATASET LATIH (LEARNING DATA) 2020 - 2025")
     print(f"   Periode: {start_date} s/d {end_date}")
     print("=" * 75 + "\n")
 
@@ -140,9 +140,9 @@ def build_learning_dataset(
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="Script Unduh & Bangun Dataset Latih 2023 - 2024")
-    parser.add_argument("--start_date", type=str, default="2023-01-01", help="Tanggal awal (YYYY-MM-DD)")
-    parser.add_argument("--end_date", type=str, default="2024-12-31", help="Tanggal akhir (YYYY-MM-DD)")
+    parser = argparse.ArgumentParser(description="Script Unduh & Bangun Dataset Latih 2020 - 2025")
+    parser.add_argument("--start_date", type=str, default="2020-01-01", help="Tanggal awal (YYYY-MM-DD)")
+    parser.add_argument("--end_date", type=str, default="2025-12-31", help="Tanggal akhir (YYYY-MM-DD)")
     parser.add_argument("--sample_grids", type=int, default=None, help="Jumlah sampel kotak (opsional, default: seluruh grid)")
     parser.add_argument("--skip_firms", action="store_true", help="Lewati unduh FIRMS jika file sudah ada")
     parser.add_argument("--skip_weather", action="store_true", help="Lewati unduh cuaca jika file sudah ada")

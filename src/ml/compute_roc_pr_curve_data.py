@@ -24,17 +24,13 @@ from src.config import MODELS_DIR, PROCESSED_DATA_DIR
 
 def compute_curves():
     model_path = MODELS_DIR / "fire_risk_xgboost_model.json"
-    dataset_path = PROCESSED_DATA_DIR / "training_dataset_2023_2024.parquet"
-    if not dataset_path.exists():
-        dataset_path = PROCESSED_DATA_DIR / "training_dataset.parquet"
-
     meta_path = MODELS_DIR / "model_metadata.json"
     with open(meta_path, "r", encoding="utf-8") as f:
         meta = json.load(f)
 
     features = meta["features"]
-    th_sedang_score = float(meta.get("threshold_sedang", 28.4))
-    th_tinggi_score = float(meta.get("threshold_tinggi", 38.4))
+    th_sedang_score = float(meta.get("threshold_sedang", 60.0))
+    th_tinggi_score = float(meta.get("threshold_tinggi", 85.0))
     th_sedang_prob = th_sedang_score / 100.0
     th_tinggi_prob = th_tinggi_score / 100.0
 
@@ -42,9 +38,21 @@ def compute_curves():
     model = xgb.Booster()
     model.load_model(str(model_path))
 
-    print(f"[2/5] Membaca data uji 2024 dari: {dataset_path}")
-    df = pd.read_parquet(dataset_path)
-    df_val = df[(df["date"] >= "2024-01-01") & (df["date"] <= "2024-12-31")].copy()
+    test_2025 = PROCESSED_DATA_DIR / "training_dataset_2025.parquet"
+    if test_2025.exists():
+        dataset_path = test_2025
+        print(f"[2/5] Membaca data uji 2025 dari: {dataset_path}")
+        df = pd.read_parquet(dataset_path)
+        df["date"] = pd.to_datetime(df["date"])
+        df_val = df[df["date"] >= "2025-01-15"].copy()
+    else:
+        dataset_path = PROCESSED_DATA_DIR / "training_dataset_2023_2024.parquet"
+        if not dataset_path.exists():
+            dataset_path = PROCESSED_DATA_DIR / "training_dataset.parquet"
+        print(f"[2/5] Membaca data uji fallback dari: {dataset_path}")
+        df = pd.read_parquet(dataset_path)
+        df["date"] = pd.to_datetime(df["date"])
+        df_val = df[(df["date"] >= "2024-01-01") & (df["date"] <= "2024-12-31")].copy()
 
     X_val = df_val[features].astype(np.float32)
     y_val = df_val["target_fire_next_day"].astype(int).values

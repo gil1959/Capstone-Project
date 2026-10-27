@@ -56,12 +56,13 @@ def generate_confusion_matrix_chart() -> str:
     fig, ax = plt.subplots(figsize=(6.2, 4.2))
 
     # Matriks: Baris = Riil (Aman, Api), Kolom = Prediksi (Aman, Api)
-    cm = np.array([[4987436, 14335],
-                   [8420, 2179]])
+    # Data Uji Out-of-Time 2025 Penuh (7.818.876 Observasi Harian)
+    cm = np.array([[7504995, 298593],
+                   [5469, 9819]])
 
     # Normalisasi untuk warna kontras
-    cm_display = np.array([[0.997, 0.003],
-                           [0.794, 0.206]])
+    cm_display = np.array([[0.9617, 0.0383],
+                           [0.3577, 0.6423]])
 
     cax = ax.matshow(cm_display, cmap="YlOrRd", alpha=0.85)
 
@@ -74,8 +75,8 @@ def generate_confusion_matrix_chart() -> str:
 
     # Nilai di dalam kotak matriks
     cell_texts = [
-        [f"True Negative (TN)\n4,987,436 Kotak\n(99.71% Tepat)", f"False Positive (FP)\n14,335 Kotak\n(Alarm Palsu 0.29%)"],
-        [f"False Negative (FN)\n8,420 Kotak\n(Api Luput)", f"True Positive (TP)\n2,179 Kotak\n(Api Terdeteksi Tepat)"]
+        [f"True Negative (TN)\n7,504,995 Kotak\n(96.17% Tepat)", f"False Positive (FP)\n298,593 Kotak\n(Alarm Palsu 3.83%)"],
+        [f"False Negative (FN)\n5,469 Kotak\n(Api Luput 35.77%)", f"True Positive (TP)\n9,819 Kotak\n(Api Terdeteksi 64.23%)"]
     ]
 
     for i in range(2):
@@ -84,7 +85,7 @@ def generate_confusion_matrix_chart() -> str:
             ax.text(j, i, cell_texts[i][j], ha="center", va="center", color=color,
                     fontsize=10.5, fontweight="bold", linespacing=1.35)
 
-    ax.set_title("Matriks Konfusi Scikit-Learn (Data Uji 2024: 5.012.370 Observasi)",
+    ax.set_title("Matriks Konfusi Scikit-Learn (Data Uji 2025: 7.818.876 Observasi)",
                  fontsize=12, fontweight="bold", color=ACCENT_ORANGE, pad=14)
 
     return fig_to_base64(fig)
@@ -101,44 +102,48 @@ def generate_roc_pr_curve_chart() -> str:
     if curve_file.exists():
         with open(curve_file, "r", encoding="utf-8") as f:
             cdata = json.load(f)
-        roc_auc = float(cdata.get("roc_auc", 0.8269))
-        pr_auc = float(cdata.get("pr_auc", 0.0673))
-        baseline_prev = float(cdata.get("baseline_prevalence", 0.0021))
+        roc_auc = float(cdata.get("roc_auc", 0.9238))
+        pr_auc = float(cdata.get("pr_auc", 0.0930))
+        baseline_prev = float(cdata.get("baseline_prevalence", 0.001955))
         
         fpr = np.array(cdata["roc_curve"]["fpr"])
         tpr = np.array(cdata["roc_curve"]["tpr"])
         rec = np.array(cdata["pr_curve"]["recall"])
         prec = np.array(cdata["pr_curve"]["precision"])
         
+        score_sedang = float(cdata.get("threshold_sedang", {}).get("score", 60.0))
+        score_tinggi = float(cdata.get("threshold_tinggi", {}).get("score", 85.0))
+        
         pt_sedang_roc = cdata["threshold_sedang"]["roc_point"]
         pt_sedang_pr = cdata["threshold_sedang"]["pr_point"]
         pt_tinggi_roc = cdata["threshold_tinggi"]["roc_point"]
         pt_tinggi_pr = cdata["threshold_tinggi"]["pr_point"]
     else:
-        # Fallback jika json belum ada
-        roc_auc = 0.8269
-        pr_auc = 0.0673
-        baseline_prev = 0.0021
+        roc_auc = 0.9238
+        pr_auc = 0.0930
+        baseline_prev = 0.001955
+        score_sedang = 60.0
+        score_tinggi = 85.0
         fpr = np.linspace(0, 1, 300)
-        tpr = np.clip(1 - (1 - fpr)**2.5, 0, 1)
+        tpr = np.clip(1 - (1 - fpr)**4.0, 0, 1)
         rec = np.linspace(0.001, 1, 300)
         prec = 0.28 / (1 + 14 * rec**0.85) + 0.003
-        pt_sedang_roc = {"fpr": 0.00402, "tpr": 0.21927}
-        pt_sedang_pr = {"recall": 0.21927, "precision": 0.10368}
-        pt_tinggi_roc = {"fpr": 0.00271, "tpr": 0.19709}
-        pt_tinggi_pr = {"recall": 0.19709, "precision": 0.13339}
+        pt_sedang_roc = {"fpr": 0.04437, "tpr": 0.65319}
+        pt_sedang_pr = {"recall": 0.65319, "precision": 0.02803}
+        pt_tinggi_roc = {"fpr": 0.01044, "tpr": 0.42694}
+        pt_tinggi_pr = {"recall": 0.42694, "precision": 0.07416}
 
     # 1. Kurva ROC Asli Scikit-Learn
-    ax1.plot(fpr, tpr, color=ACCENT_ORANGE, lw=2.5, label=f"Model XGBoost (ROC-AUC = {roc_auc:.4f})")
+    ax1.plot(fpr, tpr, color=ACCENT_ORANGE, lw=2.5, label=f"Model XGBoost V2 (ROC-AUC = {roc_auc:.4f})")
     ax1.plot([0, 1], [0, 1], color=MUTED_COLOR, lw=1.5, linestyle="--", label="Garis Acak (AUC = 0.50)")
 
     # Titik Ambang Sedang (Kuning) & Titik Ambang Tinggi (Merah) persis di atas kurva
     ax1.scatter([pt_sedang_roc["fpr"]], [pt_sedang_roc["tpr"]],
                 color=ACCENT_YELLOW, s=70, zorder=6, edgecolors="#ffffff", linewidths=1.2,
-                label=f"Ambang Sedang 28.4% (FPR={pt_sedang_roc['fpr']*100:.2f}%, TPR={pt_sedang_roc['tpr']*100:.1f}%)")
+                label=f"Ambang Sedang {score_sedang:.1f}% (FPR={pt_sedang_roc['fpr']*100:.2f}%, TPR={pt_sedang_roc['tpr']*100:.1f}%)")
     ax1.scatter([pt_tinggi_roc["fpr"]], [pt_tinggi_roc["tpr"]],
                 color=ACCENT_RED, s=70, zorder=7, edgecolors="#ffffff", linewidths=1.2,
-                label=f"Ambang Tinggi 38.4% (FPR={pt_tinggi_roc['fpr']*100:.2f}%, TPR={pt_tinggi_roc['tpr']*100:.1f}%)")
+                label=f"Ambang Tinggi {score_tinggi:.1f}% (FPR={pt_tinggi_roc['fpr']*100:.2f}%, TPR={pt_tinggi_roc['tpr']*100:.1f}%)")
 
     ax1.set_xlim([0.0, 1.0])
     ax1.set_ylim([0.0, 1.05])
@@ -149,16 +154,16 @@ def generate_roc_pr_curve_chart() -> str:
     ax1.grid(True)
 
     # 2. Kurva Precision-Recall Asli Scikit-Learn
-    ax2.plot(rec, prec, color=ACCENT_BLUE, lw=2.5, label=f"Model XGBoost (PR-AUC = {pr_auc:.4f})")
+    ax2.plot(rec, prec, color=ACCENT_BLUE, lw=2.5, label=f"Model XGBoost V2 (PR-AUC = {pr_auc:.4f})")
     ax2.axhline(y=baseline_prev, color="#f87171", lw=1.5, linestyle="--", label=f"Baseline Acak (Prevalensi = {baseline_prev*100:.2f}%)")
 
     # Titik Ambang Sedang (Kuning) & Titik Ambang Tinggi (Merah) persis di atas kurva PR
     ax2.scatter([pt_sedang_pr["recall"]], [pt_sedang_pr["precision"]],
                 color=ACCENT_YELLOW, s=70, zorder=6, edgecolors="#ffffff", linewidths=1.2,
-                label=f"Ambang Sedang 28.4% (Recall={pt_sedang_pr['recall']*100:.1f}%, Prec={pt_sedang_pr['precision']*100:.1f}%)")
+                label=f"Ambang Sedang {score_sedang:.1f}% (Recall={pt_sedang_pr['recall']*100:.1f}%, Prec={pt_sedang_pr['precision']*100:.1f}%)")
     ax2.scatter([pt_tinggi_pr["recall"]], [pt_tinggi_pr["precision"]],
                 color=ACCENT_RED, s=70, zorder=7, edgecolors="#ffffff", linewidths=1.2,
-                label=f"Ambang Tinggi 38.4% (Recall={pt_tinggi_pr['recall']*100:.1f}%, Prec={pt_tinggi_pr['precision']*100:.1f}%)")
+                label=f"Ambang Tinggi {score_tinggi:.1f}% (Recall={pt_tinggi_pr['recall']*100:.1f}%, Prec={pt_tinggi_pr['precision']*100:.1f}%)")
 
     ax2.set_xlim([0.0, 1.0])
     ax2.set_ylim([0.0, max(0.35, np.max(prec) * 1.15)])
@@ -177,16 +182,16 @@ def generate_feature_importance_chart() -> str:
     fig, ax = plt.subplots(figsize=(10.5, 4.8))
 
     features = [
-        ("max_frp", 30.29, "Energi Panas Satelit Hari Ini (MW)", ACCENT_ORANGE),
-        ("hotspot_count", 21.09, "Kerapatan Titik Api Aktif 5 km", ACCENT_ORANGE),
-        ("rain_sum_14d", 14.41, "Akumulasi Hujan 14 Hari (Kekeringan)", ACCENT_BLUE),
-        ("hotspot_lag_1d", 5.94, "Bara Api Kemarin (Smoldering Gambut)", "#f43f5e"),
-        ("vpd_max", 5.85, "Tekanan Uap Udara (VPD Maks)", ACCENT_YELLOW),
-        ("rain_sum", 4.84, "Curah Hujan Harian Terkini (mm)", ACCENT_BLUE),
-        ("rain_sum_7d", 4.82, "Akumulasi Hujan 7 Hari (mm)", ACCENT_BLUE),
-        ("dry_days_count", 4.25, "Hari Kering Tanpa Hujan", ACCENT_YELLOW),
-        ("soil_moisture_0_7cm", 3.11, "Kelembapan Tanah Permukaan", ACCENT_GREEN),
-        ("temp_max", 2.40, "Suhu Udara Maksimum (°C)", "#fb923c")
+        ("fire_cluster_momentum", 41.33, "Momentum Klaster Api & Tetangga (Termodinamika)", ACCENT_RED),
+        ("is_dry_season", 13.34, "Musim Kemarau Kalimantan (Juli - Okt)", ACCENT_YELLOW),
+        ("month_sin", 7.79, "Siklus Musiman Kalender (Sinus)", ACCENT_BLUE),
+        ("hotspot_count_14d", 7.42, "Akumulasi Api 14 Hari (Persistence)", ACCENT_ORANGE),
+        ("neighbor_fire_count_3d", 7.39, "Titik Api Tetangga 3 Hari (Spasial)", ACCENT_ORANGE),
+        ("road_x_dry_days", 3.26, "Akses Jalan x Hari Kering (Aktivitas Manusia)", "#f43f5e"),
+        ("distance_to_road_km", 1.74, "Jarak ke Jalan Raya OSM (Aksesibilitas)", "#a78bfa"),
+        ("hotspot_count_7d", 1.50, "Akumulasi Titik Api 7 Hari", ACCENT_ORANGE),
+        ("rain_sum", 1.29, "Curah Hujan Harian Terkini (mm)", ACCENT_BLUE),
+        ("peat_coverage_pct", 1.10, "Tutupan Lahan Gambut KLHK (%)", "#f472b6")
     ]
 
     # Urutkan dari terkecil ke terbesar agar bar teratas adalah fitur terpenting
@@ -202,9 +207,9 @@ def generate_feature_importance_chart() -> str:
     ax.set_yticks(y_pos)
     ax.set_yticklabels([f"{n} ({d})" for n, d in zip(names, descs)], fontsize=10)
     ax.set_xlabel("Tingkat Pengaruh Gain Terhadap Prediksi (%)", fontsize=11, labelpad=8)
-    ax.set_title("XGBoost Feature Importance: Top 10 Faktor Pemicu Karhutla Kalimantan",
+    ax.set_title("XGBoost 47 Fitur Termodinamika: Top 10 Faktor Pemicu Karhutla Kalimantan",
                  fontsize=12.5, fontweight="bold", color=ACCENT_ORANGE, pad=12)
-    ax.set_xlim([0, 35])
+    ax.set_xlim([0, 48])
     ax.grid(axis="x", linestyle="--", alpha=0.5)
 
     # Tampilkan persentase tepat di samping setiap bar
@@ -217,35 +222,37 @@ def generate_feature_importance_chart() -> str:
 
 
 def generate_temporal_trend_chart() -> str:
-    """Menghasilkan grafik perbandingan temporal titik api 2023 (El Nino) vs 2024"""
+    """Menghasilkan grafik perbandingan temporal titik api multi-tahun (2023 El Nino, 2024 Latih, vs 2025 Uji)"""
     fig, ax = plt.subplots(figsize=(10.5, 4.2))
 
     months = ["Jan", "Feb", "Mar", "Apr", "Mei", "Jun", "Jul", "Agu", "Sep", "Okt", "Nov", "Des"]
-    y2023 = [120, 240, 580, 1100, 2450, 4800, 9200, 15400, 21430, 18770, 4120, 890]
-    y2024 = [95, 180, 410, 850, 1600, 3100, 5200, 6900, 7579, 2792, 650, 159]
+    y2023 = [398, 462, 376, 999, 1321, 1783, 7550, 21966, 25297, 20813, 2408, 851]
+    y2024 = [631, 1095, 1169, 1818, 668, 542, 4618, 3766, 16472, 3920, 866, 230]
+    y2025 = [74, 251, 155, 178, 583, 548, 6025, 6982, 8559, 2351, 594, 120]
 
     x = np.arange(len(months))
-    ax.plot(x, y2023, marker="o", lw=2.5, color=ACCENT_RED, label="2023 (Fase El Nino Ekstrem - Latih)")
-    ax.plot(x, y2024, marker="s", lw=2.5, color=ACCENT_BLUE, label="2024 (Fase Normal/La Nina - Uji Penuh)")
+    ax.plot(x, y2023, marker="o", lw=2.2, color=ACCENT_RED, label="2023 (Fase El Nino Ekstrem - Latih: 84.224)")
+    ax.plot(x, y2024, marker="^", lw=2.0, color="#94a3b8", label="2024 (Fase Latih Terakhir: 35.795)")
+    ax.plot(x, y2025, marker="s", lw=2.5, color=ACCENT_BLUE, label="2025 (Fase Evaluasi Uji Penuh Out-of-Time: 26.420)")
 
-    # Highlight bulan puncak kemarau (September - Oktober)
-    ax.axvspan(7.5, 9.5, color="#facc15", alpha=0.15, label="Fase Puncak Rawan Kemarau")
+    # Highlight bulan puncak kemarau (Juli - Oktober)
+    ax.axvspan(6.0, 9.5, color="#facc15", alpha=0.12, label="Fase Puncak Rawan Kemarau (Juli - Okt)")
 
     ax.set_xticks(x)
     ax.set_xticklabels(months, fontsize=10.5)
-    ax.set_ylabel("Total Titik Api Terdeteksi Satelit (Hotspot)", fontsize=11)
-    ax.set_title("Tren Temporal Dinamika Kebakaran Hutan Kalimantan (2023 vs 2024)",
+    ax.set_ylabel("Total Titik Api Satelit (Hotspot NASA FIRMS)", fontsize=11)
+    ax.set_title("Tren Temporal Dinamika Kebakaran Hutan Kalimantan Multi-Tahun (2023 - 2025)",
                  fontsize=12.5, fontweight="bold", color=ACCENT_ORANGE, pad=12)
-    ax.legend(loc="upper left", fontsize=10, facecolor="#101d28", edgecolor="#30424f")
+    ax.legend(loc="upper left", fontsize=9.5, facecolor="#101d28", edgecolor="#30424f")
     ax.grid(True)
 
-    # Annotate peak 2023 & 2024
-    ax.annotate("Puncak 2023: 21.430 Hotspot", xy=(8, 21430), xytext=(6.2, 22500),
+    # Annotate peak 2023 & 2025
+    ax.annotate("Puncak 2023: 25.297 Api", xy=(8, 25297), xytext=(6.0, 26000),
                 arrowprops=dict(arrowstyle="->", color=ACCENT_RED, lw=1.5),
-                color=ACCENT_RED, fontweight="bold", fontsize=10)
-    ax.annotate("Puncak 2024: 7.579 Hotspot", xy=(8, 7579), xytext=(8.3, 11000),
+                color=ACCENT_RED, fontweight="bold", fontsize=9.5)
+    ax.annotate("Puncak 2025: 8.559 Api", xy=(8, 8559), xytext=(8.3, 11500),
                 arrowprops=dict(arrowstyle="->", color=ACCENT_BLUE, lw=1.5),
-                color=ACCENT_BLUE, fontweight="bold", fontsize=10)
+                color=ACCENT_BLUE, fontweight="bold", fontsize=9.5)
 
     plt.tight_layout()
     return fig_to_base64(fig)
