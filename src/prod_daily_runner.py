@@ -102,7 +102,7 @@ def run_production_daily():
             df_subset["date"] = df_subset["date"].map(date_map)
             df_weather = df_subset
         else:
-            # Fallback baseline daratan Kalimantan
+            # Fallback baseline daratan Kalimantan jika API offline
             records = []
             date_rng = pd.date_range(start=start_date, end=latest_obs_date)
             for d in date_rng:
@@ -110,14 +110,33 @@ def run_production_daily():
                     records.append({
                         "grid_id": gid,
                         "date": d,
-                        "temperature_2m_max": 32.5,
-                        "precipitation_sum": 1.5,
-                        "wind_speed_10m_max": 12.0,
-                        "vapour_pressure_deficit_max": 1.35,
-                        "soil_moisture_0_to_7cm_mean": 0.28,
-                        "soil_moisture_7_to_28cm_mean": 0.32
+                        "temp_max": 32.5,
+                        "rain_sum": 1.5,
+                        "wind_speed_max": 12.0,
+                        "vpd_max": 1.35,
+                        "soil_moisture_0_7cm": 0.28,
+                        "soil_moisture_7_28cm": 0.32
                     })
             df_weather = pd.DataFrame(records)
+
+    # Standarisasi kolom cuaca untuk konsistensi rekayasa fitur
+    rename_cols = {
+        "temperature_2m_max": "temp_max",
+        "precipitation_sum": "rain_sum",
+        "wind_speed_10m_max": "wind_speed_max",
+        "vapour_pressure_deficit_max": "vpd_max",
+        "soil_moisture_0_to_7cm_mean": "soil_moisture_0_7cm",
+        "soil_moisture_7_to_28cm_mean": "soil_moisture_7_28cm"
+    }
+    df_weather.rename(columns={k: v for k, v in rename_cols.items() if k in df_weather.columns}, inplace=True)
+
+    # Simpan file data cuaca riil ke data/processed/latest_weather_kalimantan.parquet
+    latest_weather_file = PROCESSED_DATA_DIR / "latest_weather_kalimantan.parquet"
+    try:
+        df_weather.to_parquet(latest_weather_file, index=False)
+        print(f"[SIMPAN] Data cuaca regional Open-Meteo tersimpan di: {latest_weather_file} ({len(df_weather):,} baris).")
+    except Exception as e:
+        print(f"[WARN] Gagal menyimpan file parquet cuaca: {e}")
 
     # 4. Rekayasa 47 Fitur Spasio-temporal & Termodinamika
     print("[4/6] Menjalankan rekayasa 47 fitur spatio-temporal & termodinamika...")
