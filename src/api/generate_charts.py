@@ -51,18 +51,41 @@ def fig_to_base64(fig) -> str:
     return base64.b64encode(buf.getvalue()).decode("utf-8")
 
 
-def generate_confusion_matrix_chart() -> str:
-    """Menghasilkan Heatmap Matriks Konfusi resmi Scikit-Learn"""
+def generate_confusion_matrix_chart(cm_values=None, title=None) -> str:
+    """Menghasilkan Heatmap Matriks Konfusi (mendukung data harian operasional atau data uji 2025)"""
     fig, ax = plt.subplots(figsize=(6.2, 4.2))
 
-    # Matriks: Baris = Riil (Aman, Api), Kolom = Prediksi (Aman, Api)
-    # Data Uji Out-of-Time 2025 Penuh (7.818.876 Observasi Harian)
-    cm = np.array([[7504995, 298593],
-                   [5469, 9819]])
+    if cm_values is not None:
+        # cm_values = [[TN, FP], [FN, TP]]
+        cm = np.array(cm_values, dtype=int)
+        tn, fp = cm[0]
+        fn, tp = cm[1]
+        total_safe = tn + fp
+        total_fire = fn + tp
+        tn_pct = (tn / total_safe * 100.0) if total_safe > 0 else 100.0
+        fp_pct = (fp / total_safe * 100.0) if total_safe > 0 else 0.0
+        fn_pct = (fn / total_fire * 100.0) if total_fire > 0 else 0.0
+        tp_pct = (tp / total_fire * 100.0) if total_fire > 0 else 100.0
 
-    # Normalisasi untuk warna kontras
-    cm_display = np.array([[0.9617, 0.0383],
-                           [0.3577, 0.6423]])
+        cm_display = np.array([
+            [tn_pct / 100.0, fp_pct / 100.0],
+            [fn_pct / 100.0, tp_pct / 100.0]
+        ])
+
+        cell_texts = [
+            [f"True Negative (TN)\n{tn:,} Kotak\n({tn_pct:.2f}% Tepat)", f"False Positive (FP)\n{fp:,} Kotak\n(Alarm Palsu {fp_pct:.2f}%)"],
+            [f"False Negative (FN)\n{fn:,} Kotak\n(Api Luput {fn_pct:.2f}%)", f"True Positive (TP)\n{tp:,} Kotak\n(Api Terdeteksi {tp_pct:.2f}%)"]
+        ]
+        chart_title = title or f"Matriks Konfusi Harian Kalimantan (Total: {tn+fp+fn+tp:,} Kotak)"
+    else:
+        # Data Uji Out-of-Time 2025 Penuh (7.818.876 Observasi Harian)
+        cm_display = np.array([[0.9617, 0.0383],
+                               [0.3577, 0.6423]])
+        cell_texts = [
+            [f"True Negative (TN)\n7,504,995 Kotak\n(96.17% Tepat)", f"False Positive (FP)\n298,593 Kotak\n(Alarm Palsu 3.83%)"],
+            [f"False Negative (FN)\n5,469 Kotak\n(Api Luput 35.77%)", f"True Positive (TP)\n9,819 Kotak\n(Api Terdeteksi 64.23%)"]
+        ]
+        chart_title = title or "Matriks Konfusi Scikit-Learn (Data Uji 2025: 7.818.876 Observasi)"
 
     cax = ax.matshow(cm_display, cmap="YlOrRd", alpha=0.85)
 
@@ -73,20 +96,13 @@ def generate_confusion_matrix_chart() -> str:
     ax.set_yticklabels(["Riil: AMAN (0)", "Riil: API (1)"], fontsize=11, fontweight="bold")
     ax.xaxis.set_ticks_position("bottom")
 
-    # Nilai di dalam kotak matriks
-    cell_texts = [
-        [f"True Negative (TN)\n7,504,995 Kotak\n(96.17% Tepat)", f"False Positive (FP)\n298,593 Kotak\n(Alarm Palsu 3.83%)"],
-        [f"False Negative (FN)\n5,469 Kotak\n(Api Luput 35.77%)", f"True Positive (TP)\n9,819 Kotak\n(Api Terdeteksi 64.23%)"]
-    ]
-
     for i in range(2):
         for j in range(2):
             color = "#0a121b" if cm_display[i, j] > 0.4 else "#edf4f5"
             ax.text(j, i, cell_texts[i][j], ha="center", va="center", color=color,
                     fontsize=10.5, fontweight="bold", linespacing=1.35)
 
-    ax.set_title("Matriks Konfusi Scikit-Learn (Data Uji 2025: 7.818.876 Observasi)",
-                 fontsize=12, fontweight="bold", color=ACCENT_ORANGE, pad=14)
+    ax.set_title(chart_title, fontsize=11.5, fontweight="bold", color=ACCENT_ORANGE, pad=14)
 
     return fig_to_base64(fig)
 

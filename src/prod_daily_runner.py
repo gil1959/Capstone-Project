@@ -238,20 +238,38 @@ def run_daily_validation_tracker(today_str: str, df_today_hotspots: pd.DataFrame
     alert_grids = high_grids.union(med_grids)
 
     # Hitung hit rate: Berapa titik api hari ini yang jatuh di grid berstatus Siaga (Tinggi/Sedang)
+    total_grids = len(df_today_pred) if len(df_today_pred) > 0 else 22276
     hits = today_hotspot_grids.intersection(alert_grids)
-    hit_count = len(hits)
-    hit_rate_pct = round((hit_count / total_hotspots_today * 100.0), 1) if total_hotspots_today > 0 else 100.0
+    tp = len(hits)
+    fn = max(0, total_hotspots_today - tp)
+    fp = max(0, len(alert_grids) - tp)
+    tn = max(0, total_grids - tp - fn - fp)
+
+    recall_pct = round((tp / total_hotspots_today * 100.0), 2) if total_hotspots_today > 0 else 100.0
+    precision_pct = round((tp / len(alert_grids) * 100.0), 2) if len(alert_grids) > 0 else 0.0
+    f1_score = round(2 * (precision_pct * recall_pct) / (precision_pct + recall_pct) / 100.0, 4) if (precision_pct + recall_pct) > 0 else 0.0
+    false_alarm_rate_pct = round((fp / (tn + fp) * 100.0), 2) if (tn + fp) > 0 else 0.0
+    accuracy_pct = round(((tp + tn) / total_grids * 100.0), 2) if total_grids > 0 else 0.0
 
     entry = {
         "execution_date": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
         "prediction_date": today_str,
-        "total_grids_monitored": len(df_today_pred),
+        "total_grids_monitored": total_grids,
         "alert_high_count": len(high_grids),
         "alert_medium_count": len(med_grids),
         "active_hotspot_grids_today": total_hotspots_today,
-        "captured_in_alert_grids": hit_count,
-        "daily_capture_rate_pct": hit_rate_pct,
-        "operational_status": "Optimal" if hit_rate_pct >= 80.0 else "Waspada"
+        "captured_in_alert_grids": tp,
+        "daily_capture_rate_pct": recall_pct,
+        "tp": tp,
+        "fp": fp,
+        "fn": fn,
+        "tn": tn,
+        "precision_pct": precision_pct,
+        "recall_pct": recall_pct,
+        "f1_score": f1_score,
+        "false_alarm_rate_pct": false_alarm_rate_pct,
+        "accuracy_pct": accuracy_pct,
+        "operational_status": "Optimal" if recall_pct >= 80.0 else "Waspada"
     }
 
     # Cek apakah tanggal prediksi ini sudah pernah dicatat, jika ya perbarui
@@ -262,7 +280,7 @@ def run_daily_validation_tracker(today_str: str, df_today_hotspots: pd.DataFrame
     with open(history_file, "w", encoding="utf-8") as f:
         json.dump(history, f, indent=2)
 
-    print(f"      -> Evaluasi Harian Tersimpan: {hit_count}/{total_hotspots_today} titik api tertangkap ({hit_rate_pct}% Capture Rate).")
+    print(f"      -> Evaluasi Harian Tersimpan: TP={tp}, FP={fp}, FN={fn}, TN={tn} | Recall={recall_pct}%, Presisi={precision_pct}%, F1={f1_score}.")
 
 
 if __name__ == "__main__":

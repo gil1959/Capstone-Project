@@ -175,6 +175,123 @@ def get_daily_evaluation_rows_html() -> str:
         return "<tr><td colspan='7' style='text-align:center;'>Gagal membaca data evaluasi harian</td></tr>"
 
 
+MONTH_NAMES_ID = [
+    "", "Januari", "Februari", "Maret", "April", "Mei", "Juni",
+    "Juli", "Agustus", "September", "Oktober", "November", "Desember"
+]
+
+def format_date_indo(date_str: str) -> str:
+    """Format YYYY-MM-DD ke teks bahasa Indonesia (contoh: 28 Oktober 2026)"""
+    try:
+        parts = str(date_str).split("-")
+        y, m, d = parts[0], int(parts[1]), int(parts[2])
+        return f"{d} {MONTH_NAMES_ID[m]} {y}"
+    except Exception:
+        return str(date_str)
+
+def get_daily_evaluation_stats():
+    """
+    Mengambil metrik evaluasi harian live terbaru dari daily_evaluation_history.json.
+    Menghitung kuadran konfusi, presisi, recall, F1, alarm palsu, dll. secara dinamis.
+    """
+    hist_file = MODELS_DIR / "daily_evaluation_history.json"
+    if not hist_file.exists():
+        return None
+    try:
+        with open(hist_file, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        if not data or not isinstance(data, list) or len(data) == 0:
+            return None
+        
+        # Ambil entri evaluasi terbaru (paling atas)
+        latest = data[0]
+        N = int(latest.get("total_grids_monitored", 22276))
+        high = int(latest.get("alert_high_count", 0))
+        med = int(latest.get("alert_medium_count", 0))
+        p_pred = high + med
+        p_act = int(latest.get("active_hotspot_grids_today", 0))
+        
+        tp = int(latest.get("tp", latest.get("captured_in_alert_grids", 0)))
+        fn = int(latest.get("fn", max(0, p_act - tp)))
+        fp = int(latest.get("fp", max(0, p_pred - tp)))
+        tn = int(latest.get("tn", max(0, N - tp - fn - fp)))
+        
+        n_act_safe = max(0, N - p_act)
+        n_pred_safe = max(0, N - p_pred)
+
+        recall = (tp / p_act * 100.0) if p_act > 0 else 100.0
+        precision = (tp / p_pred * 100.0) if p_pred > 0 else 0.0
+        f1 = (2 * (precision * recall) / (precision + recall)) if (precision + recall) > 0 else 0.0
+        f1_score_val = f1 / 100.0
+
+        fa_rate = (fp / n_act_safe * 100.0) if n_act_safe > 0 else 0.0
+        tn_rate = (tn / n_act_safe * 100.0) if n_act_safe > 0 else 100.0
+        accuracy = ((tp + tn) / N * 100.0) if N > 0 else 0.0
+
+        # AMAN (Kelas 0)
+        prec_safe = (tn / n_pred_safe * 100.0) if n_pred_safe > 0 else 100.0
+        rec_safe = tn_rate
+        f1_safe = (2 * prec_safe * rec_safe / (prec_safe + rec_safe)) if (prec_safe + rec_safe) > 0 else 100.0
+
+        # API (Kelas 1)
+        prec_fire = precision
+        rec_fire = recall
+        f1_fire = f1
+
+        # Macro Average
+        macro_prec = (prec_safe + prec_fire) / 2.0
+        macro_rec = (rec_safe + rec_fire) / 2.0
+        macro_f1 = (f1_safe + f1_fire) / 2.0
+
+        # Weighted Average
+        weighted_prec = (n_act_safe * prec_safe + p_act * prec_fire) / N if N > 0 else 0.0
+        weighted_rec = (n_act_safe * rec_safe + p_act * rec_fire) / N if N > 0 else 0.0
+        weighted_f1 = (n_act_safe * f1_safe + p_act * f1_fire) / N if N > 0 else 0.0
+
+        pred_date = latest.get("prediction_date", time.strftime("%Y-%m-%d"))
+        exec_date = latest.get("execution_date", "")
+
+        return {
+            "prediction_date": pred_date,
+            "prediction_date_indo": format_date_indo(pred_date),
+            "execution_date": exec_date,
+            "N": N,
+            "high": high,
+            "med": med,
+            "p_pred": p_pred,
+            "p_act": p_act,
+            "tp": tp,
+            "fn": fn,
+            "fp": fp,
+            "tn": tn,
+            "n_act_safe": n_act_safe,
+            "n_pred_safe": n_pred_safe,
+            "recall": recall,
+            "precision": precision,
+            "f1": f1,
+            "f1_score_val": f1_score_val,
+            "fa_rate": fa_rate,
+            "tn_rate": tn_rate,
+            "accuracy": accuracy,
+            "prec_safe": prec_safe,
+            "rec_safe": rec_safe,
+            "f1_safe": f1_safe,
+            "prec_fire": prec_fire,
+            "rec_fire": rec_fire,
+            "f1_fire": f1_fire,
+            "macro_prec": macro_prec,
+            "macro_rec": macro_rec,
+            "macro_f1": macro_f1,
+            "weighted_prec": weighted_prec,
+            "weighted_rec": weighted_rec,
+            "weighted_f1": weighted_f1,
+            "operational_status": latest.get("operational_status", "Optimal")
+        }
+    except Exception as e:
+        print(f"[WARN] Gagal membaca evaluasi harian: {e}")
+        return None
+
+
 FEATURE_METADATA = {
     "fire_cluster_momentum": {
         "kategori": "Termodinamika & Klaster Spasial",
@@ -653,8 +770,212 @@ def get_feature_importance_table_rows_html() -> tuple:
 
 
 def get_admin_html() -> str:
-    # Generate visual charts menggunakan Python bawaan
-    cm_b64 = generate_confusion_matrix_chart()
+    app_env = os.getenv("APP_ENV", "local").lower()
+    is_prod = (app_env == "production")
+    daily_stats = get_daily_evaluation_stats()
+    use_daily = is_prod and (daily_stats is not None)
+
+    if use_daily:
+        tab1_nav_label = "Evaluasi Prediksi Terkini (Harian Live)"
+        cm_b64 = generate_confusion_matrix_chart(
+            cm_values=[[daily_stats["tn"], daily_stats["fp"]], [daily_stats["fn"], daily_stats["tp"]]],
+            title=f"Matriks Konfusi Harian Operasional ({daily_stats['prediction_date']})"
+        )
+        tab1_header_title = "Evaluasi Model Operasional Terkini: Hasil Prediksi Harian Live & Ground-Truth Satelit"
+        tab1_header_subtitle = f"Validasi operasional otomatis H-1 terhadap sensor satelit NASA FIRMS terkini ({daily_stats['prediction_date_indo']}). Total wilayah dipantau: {daily_stats['N']:,} kotak 5 km."
+        tab1_badge = f'<span class="status-badge badge-success">Live Pipeline: {daily_stats["prediction_date"]}</span>'
+
+        tab1_metrics_html = f"""
+            <div class="metric-grid">
+                <div class="metric-box">
+                    <div class="label">Recall Deteksi Api (Sensitivitas)</div>
+                    <div class="val" style="color: #4ade80;">{daily_stats['recall']:.2f}%</div>
+                    <div class="desc">Sensitivitas deteksi titik api riil ({daily_stats['tp']:,} dari {daily_stats['p_act']:,} api tertangkap)</div>
+                </div>
+                <div class="metric-box">
+                    <div class="label">Presisi Operasional (Grid 5 km)</div>
+                    <div class="val" style="color: #38bdf8;">{daily_stats['precision']:.2f}%</div>
+                    <div class="desc">Akurasi zona siaga mikro ({daily_stats['tp']:,} tepat / {daily_stats['p_pred']:,} kotak siaga)</div>
+                </div>
+                <div class="metric-box">
+                    <div class="label">Daily F1-Score Operasional</div>
+                    <div class="val" style="color: #4ade80;">{daily_stats['f1_score_val']:.4f} ({daily_stats['f1']:.2f}%)</div>
+                    <div class="desc">Harmonic mean presisi & recall harian</div>
+                </div>
+                <div class="metric-box">
+                    <div class="label">Alarm Palsu (False Positive)</div>
+                    <div class="val" style="color: #facc15;">{daily_stats['fp']:,} Kotak</div>
+                    <div class="desc">Hanya {daily_stats['fa_rate']:.2f}% dari total wilayah aman ({daily_stats['n_act_safe']:,} kotak)</div>
+                </div>
+                <div class="metric-box">
+                    <div class="label">True Negative (Aman Tepat)</div>
+                    <div class="val" style="color: #4ade80;">{daily_stats['tn']:,} Kotak</div>
+                    <div class="desc">{daily_stats['tn_rate']:.2f}% kondisi aman terdeteksi akurat</div>
+                </div>
+                <div class="metric-box">
+                    <div class="label">Akurasi Spasial Total</div>
+                    <div class="val" style="color: #4ade80;">{daily_stats['accuracy']:.2f}%</div>
+                    <div class="desc">Akurasi keseluruhan ({daily_stats['tp'] + daily_stats['tn']:,} dari {daily_stats['N']:,} kotak)</div>
+                </div>
+            </div>
+        """
+
+        tab1_cm_caption = f"*Dihasilkan langsung oleh modul Python Matplotlib. Menunjukkan pembagian 4 kuadran: True Negative, False Positive, False Negative, dan True Positive pada {daily_stats['N']:,} kotak Kalimantan hari ini ({daily_stats['prediction_date_indo']})."
+
+        tab1_kuadran_rows = f"""
+            <tr>
+                <td><b>True Negative (TN)</b><br><small style="color:#94a3b8;">Kondisi aman terdeteksi aman</small></td>
+                <td style="color:#4ade80; font-weight:700;">{daily_stats['tn']:,}</td>
+                <td>{daily_stats['tn_rate']:.2f}%</td>
+            </tr>
+            <tr>
+                <td><b>False Positive (FP)</b><br><small style="color:#94a3b8;">Alarm waspada tanpa api riil</small></td>
+                <td style="color:#facc15;">{daily_stats['fp']:,}</td>
+                <td>{daily_stats['fa_rate']:.2f}%</td>
+            </tr>
+            <tr>
+                <td><b>False Negative (FN)</b><br><small style="color:#94a3b8;">Titik api luput deteksi</small></td>
+                <td style="color:#f87171;">{daily_stats['fn']:,}</td>
+                <td>{100.0 - daily_stats['recall']:.2f}%</td>
+            </tr>
+            <tr>
+                <td><b>True Positive (TP)</b><br><small style="color:#94a3b8;">Titik api riil terdeteksi tepat</small></td>
+                <td style="color:#4ade80; font-weight:700;">{daily_stats['tp']:,}</td>
+                <td>{daily_stats['recall']:.2f}%</td>
+            </tr>
+        """
+
+        tab1_report_rows = f"""
+            <tr>
+                <td><b>AMAN (Kelas 0)</b></td>
+                <td>{daily_stats['prec_safe']:.2f}%</td>
+                <td>{daily_stats['rec_safe']:.2f}%</td>
+                <td style="color:#4ade80; font-weight:700;">{daily_stats['f1_safe']:.2f}%</td>
+                <td>{daily_stats['n_act_safe']:,} sel</td>
+            </tr>
+            <tr style="background: rgba(239, 155, 75, 0.1);">
+                <td><b>API (Kelas 1 - Target Siaga)</b></td>
+                <td style="color:#38bdf8; font-weight:700;">{daily_stats['prec_fire']:.2f}%</td>
+                <td style="color:#facc15; font-weight:700;">{daily_stats['rec_fire']:.2f}%</td>
+                <td style="color:#ef9b4b; font-weight:800; font-size:13px;">{daily_stats['f1_score_val']:.4f} ({daily_stats['f1_fire']:.2f}%)</td>
+                <td>{daily_stats['p_act']:,} sel</td>
+            </tr>
+            <tr>
+                <td><b>Macro Average</b></td>
+                <td>{daily_stats['macro_prec']:.2f}%</td>
+                <td>{daily_stats['macro_rec']:.2f}%</td>
+                <td style="font-weight:700;">{daily_stats['macro_f1']:.2f}%</td>
+                <td>{daily_stats['N']:,} sel</td>
+            </tr>
+            <tr>
+                <td><b>Weighted Average</b></td>
+                <td>{daily_stats['weighted_prec']:.2f}%</td>
+                <td>{daily_stats['weighted_rec']:.2f}%</td>
+                <td style="color:#4ade80; font-weight:700;">{daily_stats['weighted_f1']:.2f}%</td>
+                <td>{daily_stats['N']:,} sel</td>
+            </tr>
+        """
+        tab1_report_note = f"*Recall {daily_stats['recall']:.2f}% pada ambang batas klasifikasi siaga operasional (Skor Siaga &ge; 60.0), mendeteksi {daily_stats['tp']:,} dari {daily_stats['p_act']:,} titik api riil satelit hari ini."
+
+    else:
+        tab1_nav_label = "Evaluasi Prediksi (Visual & Metrik 2025)"
+        cm_b64 = generate_confusion_matrix_chart()
+        tab1_header_title = "Evaluasi Model Prediksi: Grafik Visualisasi Bawaan Python & Scikit-Learn"
+        tab1_header_subtitle = "Visualisasi resmi hasil pemodelan XGBoost V2 pada data uji out-of-time 2025 penuh (7.818.876 observasi harian)."
+        tab1_badge = '<span class="status-badge badge-info">Data Uji Out-of-Time 2025</span>'
+
+        tab1_metrics_html = """
+            <div class="metric-grid">
+                <div class="metric-box">
+                    <div class="label">ROC-AUC (Diskriminasi)</div>
+                    <div class="val" style="color: #4ade80;">0.9317</div>
+                    <div class="desc">Area Under Receiver Operating Characteristic Curve</div>
+                </div>
+                <div class="metric-box">
+                    <div class="label">PR-AUC (Precision-Recall)</div>
+                    <div class="val" style="color: #4ade80;">0.0947</div>
+                    <div class="desc">Area Under Precision-Recall Curve</div>
+                </div>
+                <div class="metric-box">
+                    <div class="label">Recall Deteksi Api (Sensitivitas)</div>
+                    <div class="val" style="color: #4ade80;">64.23%</div>
+                    <div class="desc">Sensitivitas deteksi titik api riil (True Positive: 9.819)</div>
+                </div>
+                <div class="metric-box">
+                    <div class="label">Alarm Palsu (False Positive)</div>
+                    <div class="val" style="color: #ef9b4b;">298.593 Kotak</div>
+                    <div class="desc">Total False Positive pada grid 5 km (3,82%)</div>
+                </div>
+                <div class="metric-box">
+                    <div class="label">Presisi Operasional (Grid 5 km)</div>
+                    <div class="val" style="color: #38bdf8;">3.18%</div>
+                    <div class="desc">Presisi deteksi spasial resolusi mikro 5 km</div>
+                </div>
+                <div class="metric-box">
+                    <div class="label">F1-Score Operasional</div>
+                    <div class="val" style="color: #38bdf8;">0.0607 (6.07%)</div>
+                    <div class="desc">Harmonic mean presisi dan recall</div>
+                </div>
+            </div>
+        """
+
+        tab1_cm_caption = "*Dihasilkan langsung oleh modul Python Matplotlib. Menunjukkan pembagian 4 kuadran: True Negative, False Positive, False Negative, dan True Positive pada 7.818.876 baris data uji 2025."
+
+        tab1_kuadran_rows = """
+            <tr>
+                <td><b>True Negative (TN)</b><br><small style="color:#94a3b8;">Kondisi aman terdeteksi aman</small></td>
+                <td style="color:#4ade80; font-weight:700;">7.504.995</td>
+                <td>96.17%</td>
+            </tr>
+            <tr>
+                <td><b>False Positive (FP)</b><br><small style="color:#94a3b8;">Alarm waspada tanpa api riil (Turun ~48k)</small></td>
+                <td style="color:#facc15;">298.593</td>
+                <td>3.83%</td>
+            </tr>
+            <tr>
+                <td><b>False Negative (FN)</b><br><small style="color:#94a3b8;">Titik api luput deteksi (Dipangkas drastis)</small></td>
+                <td style="color:#f87171;">5.469</td>
+                <td>35.77%</td>
+            </tr>
+            <tr>
+                <td><b>True Positive (TP)</b><br><small style="color:#94a3b8;">Titik api riil terdeteksi tepat</small></td>
+                <td style="color:#4ade80; font-weight:700;">9.819</td>
+                <td>64.23%</td>
+            </tr>
+        """
+
+        tab1_report_rows = """
+            <tr>
+                <td><b>AMAN (Kelas 0)</b></td>
+                <td>99.93%</td>
+                <td>96.17%</td>
+                <td style="color:#4ade80; font-weight:700;">98.01%</td>
+                <td>7.803.588 sel</td>
+            </tr>
+            <tr style="background: rgba(239, 155, 75, 0.1);">
+                <td><b>API (Kelas 1 - Rare Event)</b></td>
+                <td style="color:#38bdf8; font-weight:700;">3.18%</td>
+                <td style="color:#facc15; font-weight:700;">64.23%</td>
+                <td style="color:#ef9b4b; font-weight:800; font-size:13px;">0.0607 (6.07%)</td>
+                <td>15.288 sel</td>
+            </tr>
+            <tr>
+                <td><b>Macro Average</b></td>
+                <td>51.56%</td>
+                <td>80.20%</td>
+                <td style="font-weight:700;">52.04%</td>
+                <td>7.818.876 sel</td>
+            </tr>
+            <tr>
+                <td><b>Weighted Average</b></td>
+                <td>99.67%</td>
+                <td>99.35%</td>
+                <td style="color:#4ade80; font-weight:700;">99.51%</td>
+                <td>7.818.876 sel</td>
+            </tr>
+        """
+        tab1_report_note = "*Recall 64.23% pada ambang batas klasifikasi siaga operasional (Skor Siaga &ge; 60.0), mendeteksi 9.819 dari 15.288 titik api riil."
+
     roc_b64 = generate_roc_pr_curve_chart()
     feat_b64 = generate_feature_importance_chart()
     trend_b64 = generate_temporal_trend_chart()
@@ -901,7 +1222,7 @@ def get_admin_html() -> str:
         <nav class="nav-tabs">
             <button type="button" class="tab-btn active" onclick="switchAdminTab('tab-prediksi')">
                 <svg class="icon-svg" viewBox="0 0 24 24"><path d="M19 3H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zM9 17H7v-7h2v7zm4 0h-2V7h2v10zm4 0h-2v-4h2v4z"/></svg>
-                <span>Evaluasi Prediksi (Visual & Metrik 2025)</span>
+                <span>{tab1_nav_label}</span>
             </button>
             <button type="button" class="tab-btn" onclick="switchAdminTab('tab-latih')">
                 <svg class="icon-svg" viewBox="0 0 24 24"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 17.93c-3.95-.49-7-3.85-7-7.93 0-.62.08-1.21.21-1.79L9 15v1c0 1.1.9 2 2 2v1.93zm6.9-2.54c-.26-.81-1-1.39-1.9-1.39h-1v-3c0-.55-.45-1-1-1H8v-2h2c.55 0 1-.45 1-1V7h2c1.1 0 2-.9 2-2v-.41c2.93 1.19 5 4.06 5 7.41 0 2.08-.8 3.97-2.1 5.39z"/></svg>
@@ -935,47 +1256,16 @@ def get_admin_html() -> str:
                     <div>
                         <div class="card-title">
                             <svg class="icon-svg" viewBox="0 0 24 24"><path d="M19 3H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zM9 17H7v-7h2v7zm4 0h-2V7h2v10zm4 0h-2v-4h2v4z"/></svg>
-                            Evaluasi Model Prediksi: Grafik Visualisasi Bawaan Python & Scikit-Learn
+                            {tab1_header_title}
                         </div>
                         <div class="card-subtitle">
-                            Visualisasi resmi hasil pemodelan XGBoost V2 pada data uji out-of-time 2025 penuh (7.818.876 observasi harian).
+                            {tab1_header_subtitle}
                         </div>
                     </div>
-                    <span class="status-badge badge-info">Data Uji Out-of-Time 2025</span>
+                    {tab1_badge}
                 </div>
 
-                <div class="metric-grid">
-                    <div class="metric-box">
-                        <div class="label">ROC-AUC (Diskriminasi)</div>
-                        <div class="val" style="color: #4ade80;">0.9317</div>
-                        <div class="desc">Area Under Receiver Operating Characteristic Curve</div>
-                    </div>
-                    <div class="metric-box">
-                        <div class="label">PR-AUC (Precision-Recall)</div>
-                        <div class="val" style="color: #4ade80;">0.0947</div>
-                        <div class="desc">Area Under Precision-Recall Curve</div>
-                    </div>
-                    <div class="metric-box">
-                        <div class="label">Recall Deteksi Api (Sensitivitas)</div>
-                        <div class="val" style="color: #4ade80;">64.23%</div>
-                        <div class="desc">Sensitivitas deteksi titik api riil (True Positive: 9.819)</div>
-                    </div>
-                    <div class="metric-box">
-                        <div class="label">Alarm Palsu (False Positive)</div>
-                        <div class="val" style="color: #ef9b4b;">298.593 Kotak</div>
-                        <div class="desc">Total False Positive pada grid 5 km (3,82%)</div>
-                    </div>
-                    <div class="metric-box">
-                        <div class="label">Presisi Operasional (Grid 5 km)</div>
-                        <div class="val" style="color: #38bdf8;">3.18%</div>
-                        <div class="desc">Presisi deteksi spasial resolusi mikro 5 km</div>
-                    </div>
-                    <div class="metric-box">
-                        <div class="label">F1-Score Operasional</div>
-                        <div class="val" style="color: #38bdf8;">0.0607 (6.07%)</div>
-                        <div class="desc">Harmonic mean presisi dan recall</div>
-                    </div>
-                </div>
+                {tab1_metrics_html}
 
                 <!-- 1. VISUALISASI MATRIKS KONFUSI & CLASSIFICATION REPORT -->
                 <div style="margin-top: 16px;">
@@ -986,7 +1276,7 @@ def get_admin_html() -> str:
                         <div class="chart-box" style="margin-bottom: 0;">
                             <img src="data:image/png;base64,{cm_b64}" alt="Heatmap Matriks Konfusi Python" />
                             <div class="chart-caption">
-                                *Dihasilkan langsung oleh modul Python Matplotlib. Menunjukkan pembagian 4 kuadran: True Negative, False Positive, False Negative, dan True Positive pada 7.818.876 baris data uji 2025.
+                                {tab1_cm_caption}
                             </div>
                         </div>
                         <div>
@@ -995,26 +1285,7 @@ def get_admin_html() -> str:
                                     <tr><th>Kuadran Matriks</th><th>Jumlah Grid Riil</th><th>Persentase</th></tr>
                                 </thead>
                                 <tbody>
-                                    <tr>
-                                        <td><b>True Negative (TN)</b><br><small style="color:#94a3b8;">Kondisi aman terdeteksi aman</small></td>
-                                        <td style="color:#4ade80; font-weight:700;">7.504.995</td>
-                                        <td>96.17%</td>
-                                    </tr>
-                                    <tr>
-                                        <td><b>False Positive (FP)</b><br><small style="color:#94a3b8;">Alarm waspada tanpa api riil (Turun ~48k)</small></td>
-                                        <td style="color:#facc15;">298.593</td>
-                                        <td>3.83%</td>
-                                    </tr>
-                                    <tr>
-                                        <td><b>False Negative (FN)</b><br><small style="color:#94a3b8;">Titik api luput deteksi (Dipangkas drastis)</small></td>
-                                        <td style="color:#f87171;">5.469</td>
-                                        <td>35.77%</td>
-                                    </tr>
-                                    <tr>
-                                        <td><b>True Positive (TP)</b><br><small style="color:#94a3b8;">Titik api riil terdeteksi tepat</small></td>
-                                        <td style="color:#4ade80; font-weight:700;">9.819</td>
-                                        <td>64.23%</td>
-                                    </tr>
+                                    {tab1_kuadran_rows}
                                 </tbody>
                             </table>
 
@@ -1026,38 +1297,11 @@ def get_admin_html() -> str:
                                     <tr><th>Kategori / Kelas</th><th>Precision</th><th>Recall</th><th>F1-Score</th><th>Dukungan (Support)</th></tr>
                                 </thead>
                                 <tbody>
-                                    <tr>
-                                        <td><b>AMAN (Kelas 0)</b></td>
-                                        <td>99.93%</td>
-                                        <td>96.17%</td>
-                                        <td style="color:#4ade80; font-weight:700;">98.01%</td>
-                                        <td>7.803.588 sel</td>
-                                    </tr>
-                                    <tr style="background: rgba(239, 155, 75, 0.1);">
-                                        <td><b>API (Kelas 1 - Rare Event)</b></td>
-                                        <td style="color:#38bdf8; font-weight:700;">3.18%</td>
-                                        <td style="color:#facc15; font-weight:700;">64.23%</td>
-                                        <td style="color:#ef9b4b; font-weight:800; font-size:13px;">0.0607 (6.07%)</td>
-                                        <td>15.288 sel</td>
-                                    </tr>
-                                    <tr>
-                                        <td><b>Macro Average</b></td>
-                                        <td>51.56%</td>
-                                        <td>80.20%</td>
-                                        <td style="font-weight:700;">52.04%</td>
-                                        <td>7.818.876 sel</td>
-                                    </tr>
-                                    <tr>
-                                        <td><b>Weighted Average</b></td>
-                                        <td>99.67%</td>
-                                        <td>99.35%</td>
-                                        <td style="color:#4ade80; font-weight:700;">99.51%</td>
-                                        <td>7.818.876 sel</td>
-                                    </tr>
+                                    {tab1_report_rows}
                                 </tbody>
                             </table>
                             <div style="font-size: 11px; color: #94a3b8; margin-top: 5px;">
-                                *Recall 64.23% pada ambang batas klasifikasi siaga operasional (Skor Siaga &ge; 60.0), mendeteksi 9.819 dari 15.288 titik api riil.
+                                {tab1_report_note}
                             </div>
                         </div>
                     </div>

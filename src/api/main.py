@@ -360,9 +360,10 @@ def format_date_indo(date_str: str) -> str:
         return date_str
 
 def get_current_prediction_meta():
-    """Mengambil metadata tanggal prediksi dinamis dari file GeoJSON terkini"""
+    """Mengambil metadata tanggal prediksi dinamis dari file GeoJSON terkini atau history harian"""
+    is_prod = os.getenv("APP_ENV", "local").lower() == "production"
     latest_path = PROCESSED_DATA_DIR / "latest_fire_warning_kalimantan.geojson"
-    target_date = "2025-09-24"
+    target_date = "2025-09-24" if not is_prod else datetime.now().strftime("%Y-%m-%d")
     if latest_path.exists():
         try:
             with open(latest_path, "r", encoding="utf-8") as f:
@@ -376,14 +377,25 @@ def get_current_prediction_meta():
                 if hist_file.exists():
                     with open(hist_file, "r", encoding="utf-8") as hf:
                         hdata = json.load(hf)
-                    if hdata and isinstance(hdata, list):
+                    if hdata and isinstance(hdata, list) and len(hdata) > 0:
                         target_date = hdata[0].get("prediction_date", target_date)
         except Exception:
             pass
+    elif is_prod:
+        hist_file = MODELS_DIR / "daily_evaluation_history.json"
+        if hist_file.exists():
+            try:
+                with open(hist_file, "r", encoding="utf-8") as hf:
+                    hdata = json.load(hf)
+                if hdata and isinstance(hdata, list) and len(hdata) > 0:
+                    target_date = hdata[0].get("prediction_date", target_date)
+            except Exception:
+                pass
     return target_date, format_date_indo(target_date)
 
 def get_dynamic_date_options(latest_date, latest_indo):
-    """Menyusun opsi dropdown tanggal secara dinamis sesuai file yang ada"""
+    """Menyusun opsi dropdown tanggal secara dinamis sesuai environment (VPS vs Lokal)"""
+    is_prod = os.getenv("APP_ENV", "local").lower() == "production"
     options = [
         f'<option value="latest" selected>Prediksi Model Terkini ({latest_indo})</option>'
     ]
@@ -394,13 +406,19 @@ def get_dynamic_date_options(latest_date, latest_indo):
     )
     for a in archives:
         d_str = a.name.replace("fire_warning_kalimantan_", "").replace(".geojson", "")
+        # Di VPS Production: HAPUS TOTAL SEMUA TANGGAL 2025
+        if is_prod and d_str.startswith("2025-"):
+            continue
         if d_str != latest_date and d_str != "2025-09-24":
             options.append(f'<option value="{d_str}">{format_date_indo(d_str)} (Arsip Harian H+1)</option>')
 
-    options.append('<option value="2025-09-24">24 September 2025 (Puncak Karhutla - Skenario Uji)</option>')
-    options.append('<option value="2025-08-28">28 Agustus 2025 (Fase Kritis Kemarau - Skenario Uji)</option>')
-    options.append('<option value="2025-07-30">30 Juli 2025 (Awal Eskalasi Kemarau - Skenario Uji)</option>')
-    options.append('<option value="2025-12-31">31 Desember 2025 (Musim Hujan - Skenario Uji)</option>')
+    # Opsi 2025 HANYA untuk komputer lokal (presentasi sidang dosen)
+    if not is_prod:
+        options.append('<option value="2025-09-24">24 September 2025 (Puncak Karhutla - Skenario Uji)</option>')
+        options.append('<option value="2025-08-28">28 Agustus 2025 (Fase Kritis Kemarau - Skenario Uji)</option>')
+        options.append('<option value="2025-07-30">30 Juli 2025 (Awal Eskalasi Kemarau - Skenario Uji)</option>')
+        options.append('<option value="2025-12-31">31 Desember 2025 (Musim Hujan - Skenario Uji)</option>')
+
     return "\n".join(options)
 
 
@@ -916,7 +934,7 @@ def index():
 
             <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
                 <span style="font-size: 12px; color: #cbd5e1; font-weight: 600;">Daftar Wilayah Prioritas Terkini:</span>
-                <a href="/api/download-report-csv?date=2025-09-24" class="tool-btn" style="padding: 5px 10px; font-size: 11.5px; background: #ef9b4b; color: #0a121b; font-weight: 700;">
+                <a href="/api/download-report-csv?date=latest" class="tool-btn" style="padding: 5px 10px; font-size: 11.5px; background: #ef9b4b; color: #0a121b; font-weight: 700;">
                     <svg class="icon-svg" viewBox="0 0 24 24"><path d="M19.35 10.04C18.67 6.59 15.64 4 12 4 9.11 4 6.6 5.64 5.35 8.04 2.34 8.36 0 10.91 0 14c0 3.31 2.69 6 6 6h13c2.76 0 5-2.24 5-5 0-2.64-2.05-4.78-4.65-4.96zM17 13l-5 5-5-5h3V9h4v4h3z"/></svg>
                     Ekspor CSV
                 </a>
@@ -953,7 +971,7 @@ def index():
                 Daftar wilayah dengan skor risiko tertinggi (Status TINGGI) hasil model XGBoost untuk panduan patroli darat Manggala Agni / BPBD.
             </p>
             <div style="margin-bottom: 12px;">
-                <a href="/api/download-report-csv?date=2025-09-24" id="modal-csv-btn" class="tool-btn" style="display: inline-flex; background: #ef9b4b; color: #0a121b; font-weight: 700;">
+                <a href="/api/download-report-csv?date=latest" id="modal-csv-btn" class="tool-btn" style="display: inline-flex; background: #ef9b4b; color: #0a121b; font-weight: 700;">
                     <svg class="icon-svg" viewBox="0 0 24 24"><path d="M19.35 10.04C18.67 6.59 15.64 4 12 4 9.11 4 6.6 5.64 5.35 8.04 2.34 8.36 0 10.91 0 14c0 3.31 2.69 6 6 6h13c2.76 0 5-2.24 5-5 0-2.64-2.05-4.78-4.65-4.96zM17 13l-5 5-5-5h3V9h4v4h3z"/></svg>
                     Unduh Laporan Lengkap (.CSV)
                 </a>

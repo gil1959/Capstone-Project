@@ -36,3 +36,4 @@ data/processed/*.geojson
 # Logs & Temporary Files
 logs/
 *.log
+scratch/
