@@ -118,9 +118,16 @@ def get_grid_summary(date: str = Query("latest")):
     total_grid = len(data["features"])
     mean_score = total_score / total_grid if total_grid > 0 else 0.0
 
+    target_d = date
+    if date == "latest":
+        target_d, target_disp = get_current_prediction_meta()
+    else:
+        target_disp = format_date_indo(target_d)
+
     return {
         "total_grid": total_grid,
-        "target_date": date,
+        "target_date": target_d,
+        "target_date_display": target_disp,
         "risk_counts": {
             "Rendah": counts["RENDAH"],
             "Sedang": counts["SEDANG"],
@@ -338,17 +345,73 @@ def get_risk_trends():
     }
 
 
+MONTH_NAMES_ID = [
+    "", "Januari", "Februari", "Maret", "April", "Mei", "Juni",
+    "Juli", "Agustus", "September", "Oktober", "November", "Desember"
+]
+
+def format_date_indo(date_str: str) -> str:
+    """Format YYYY-MM-DD ke teks bahasa Indonesia (contoh: 28 Oktober 2026)"""
+    try:
+        parts = date_str.split("-")
+        y, m, d = parts[0], int(parts[1]), int(parts[2])
+        return f"{d} {MONTH_NAMES_ID[m]} {y}"
+    except Exception:
+        return date_str
+
+def get_current_prediction_meta():
+    """Mengambil metadata tanggal prediksi dinamis dari file GeoJSON terkini"""
+    latest_path = PROCESSED_DATA_DIR / "latest_fire_warning_kalimantan.geojson"
+    target_date = "2025-09-24"
+    if latest_path.exists():
+        try:
+            with open(latest_path, "r", encoding="utf-8") as f:
+                d = json.load(f)
+            if "target_date" in d and d["target_date"]:
+                target_date = d["target_date"]
+            elif d.get("name") and "fire_warning_kalimantan_" in d["name"]:
+                target_date = d["name"].replace("fire_warning_kalimantan_", "")
+            else:
+                hist_file = MODELS_DIR / "daily_evaluation_history.json"
+                if hist_file.exists():
+                    with open(hist_file, "r", encoding="utf-8") as hf:
+                        hdata = json.load(hf)
+                    if hdata and isinstance(hdata, list):
+                        target_date = hdata[0].get("prediction_date", target_date)
+        except Exception:
+            pass
+    return target_date, format_date_indo(target_date)
+
+def get_dynamic_date_options(latest_date, latest_indo):
+    """Menyusun opsi dropdown tanggal secara dinamis sesuai file yang ada"""
+    options = [
+        f'<option value="latest" selected>Prediksi Model Terkini ({latest_indo})</option>'
+    ]
+    archives = sorted(
+        list(PROCESSED_DATA_DIR.glob("fire_warning_kalimantan_*.geojson")),
+        key=lambda p: p.name,
+        reverse=True
+    )
+    for a in archives:
+        d_str = a.name.replace("fire_warning_kalimantan_", "").replace(".geojson", "")
+        if d_str != latest_date and d_str != "2025-09-24":
+            options.append(f'<option value="{d_str}">{format_date_indo(d_str)} (Arsip Harian H+1)</option>')
+
+    options.append('<option value="2025-09-24">24 September 2025 (Puncak Karhutla - Skenario Uji)</option>')
+    options.append('<option value="2025-08-28">28 Agustus 2025 (Fase Kritis Kemarau - Skenario Uji)</option>')
+    options.append('<option value="2025-07-30">30 Juli 2025 (Awal Eskalasi Kemarau - Skenario Uji)</option>')
+    options.append('<option value="2025-12-31">31 Desember 2025 (Musim Hujan - Skenario Uji)</option>')
+    return "\n".join(options)
+
+
 @app.get("/", response_class=HTMLResponse)
 def index():
     """Halaman Utama Web GIS Berdesain Clean Glassmorphism dengan Penanda Bahaya Proporsional"""
     default_date = "latest"
     env_badge = ""
-    date_title = 'Prediksi untuk <b>24 September 2025</b> <small>H+1 (Puncak Kemarau Kalimantan)</small>'
-    date_options = f"""<option value="latest" selected>🔥 Prediksi Model Terkini (24 Sep 2025 - 2.916 Sel Merah)</option>
-                <option value="2025-09-24">24 September 2025 (Puncak Karhutla - 2.916 Sel Siaga Merah)</option>
-                <option value="2025-08-28">28 Agustus 2025 (Fase Kritis Kemarau - 2.296 Sel Siaga Merah)</option>
-                <option value="2025-07-30">30 Juli 2025 (Awal Eskalasi Kemarau - 1.681 Sel Siaga Merah)</option>
-                <option value="2025-12-31">31 Desember 2025 (Musim Hujan - 100% Aman)</option>"""
+    latest_target_date, latest_formatted = get_current_prediction_meta()
+    date_title = f'Prediksi untuk <b>{latest_formatted}</b> <small>H+1 (Peringatan Dini Operasional)</small>'
+    date_options = get_dynamic_date_options(latest_target_date, latest_formatted)
 
     html_content = """<!DOCTYPE html>
 <html lang="id">
@@ -1182,6 +1245,10 @@ def index():
                         <span class="chip"><span class="chip-dot" style="background: #ef4444;"></span> Tinggi: ${high.toLocaleString()} sel</span>
                     `;
                     document.getElementById('warning-total-label').innerText = `Peringatan Bahaya: ${high.toLocaleString()} Titik Siaga`;
+                    if (data.target_date_display) {
+                        document.getElementById('date-label').innerHTML = `Prediksi untuk <b>${data.target_date_display}</b> <small>H+1 (Peringatan Dini Operasional)</small>`;
+                        document.getElementById('warning-date-label').innerText = `Prediksi: ${data.target_date_display} (H+1)`;
+                    }
                 });
         };
 
@@ -1427,16 +1494,6 @@ def index():
 
         window.changeDate = function(date) {
             document.getElementById('popover-tanggal').classList.remove('open');
-            const titles = {
-                'latest': '24 September 2025 <small>H+1 (Puncak Kemarau Kalimantan)</small>',
-                '2025-09-24': '24 September 2025 <small>H+1 (Puncak Karhutla - 2.916 Sel Merah)</small>',
-                '2025-08-28': '28 Agustus 2025 <small>H+1 (Fase Kritis Kemarau - 2.296 Sel Merah)</small>',
-                '2025-07-30': '30 Juli 2025 <small>H+1 (Awal Eskalasi Kemarau - 1.681 Sel Merah)</small>',
-                '2025-12-31': '31 Desember 2025 <small>H+1 (Musim Penghujan - 100% Aman)</small>'
-            };
-            const displayTitle = titles[date] || (date + ' <small>H+1</small>');
-            document.getElementById('date-label').innerHTML = 'Prediksi untuk <b>' + displayTitle + '</b>';
-            document.getElementById('warning-date-label').innerText = 'Prediksi: ' + (date === 'latest' ? '24 September 2025' : date) + ' (H+1)';
             loadData(date);
         };
 

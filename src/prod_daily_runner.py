@@ -179,6 +179,9 @@ def run_production_daily():
     geojson_dict = {
         "type": "FeatureCollection",
         "name": f"fire_warning_kalimantan_{target_pred_date}",
+        "target_date": target_pred_date,
+        "observation_date": latest_obs_date,
+        "generated_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S WIB"),
         "crs": {"type": "name", "properties": {"name": "urn:ogc:def:crs:EPSG::4324"}},
         "features": features_list
     }
